@@ -83,7 +83,7 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     writeLowThreshold(writeBufferSize * p->write_low_thresh_perc / 100.0),
     minWritesPerSwitch(p->min_writes_per_switch),
     writesThisTime(0), readsThisTime(0),
-    tCK(p->tCK), tRTW(p->tRTW), tCS(p->tCS), tBURST(p->tBURST),
+    tCK(p->tCK), tRTW(p->tRTW), tCS(p->tCS), tBURST(p->tBURST), tWP(p->tWP),
     tCCD_L_WR(p->tCCD_L_WR),
     tCCD_L(p->tCCD_L), tRCD(p->tRCD), tCL(p->tCL), tRP(p->tRP), tRAS(p->tRAS),
     tWR(p->tWR), tRTP(p->tRTP), tRFC(p->tRFC), tREFI(p->tREFI), tRRD(p->tRRD),
@@ -91,7 +91,7 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     activationLimit(p->activation_limit), rankToRankDly(tCS + tBURST),
     wrToRdDly(tCL + tBURST + p->tWTR), rdToWrDly(tRTW + tBURST),
     memSchedPolicy(p->mem_sched_policy), addrMapping(p->addr_mapping),
-    pageMgmt(p->page_policy),
+    pageMgmt(p->page_policy), memCellScheme(p->mem_cell_scheme),
     maxAccessesPerRow(p->max_accesses_per_row),
     frontendLatency(p->static_frontend_latency),
     backendLatency(p->static_backend_latency),
@@ -127,6 +127,11 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     // determine the dram actual capacity from the DRAM config in Mbytes
     uint64_t deviceCapacity = deviceSize / (1024 * 1024) * devicesPerRank *
         ranksPerChannel;
+
+    if (deviceCapacity < capacity / (1024 * 1024))
+        fatal("DRAM device capacity (%d Mbytes) does not match the "
+             "address range assigned (%d Mbytes)\n", deviceCapacity,
+             capacity / (1024 * 1024));
 
     // if actual DRAM size does not match memory capacity in system warn!
     if (deviceCapacity != capacity / (1024 * 1024))
@@ -181,6 +186,32 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
                   "bank groups per rank (%d) is greater than 1\n",
                   tRRD_L, tRRD, bankGroupsPerRank);
         }
+    }
+
+    assert(tBURST == (tCK * burstLength / 2));
+    assert(tXS >= tXP);
+
+    if (memCellScheme == Enums::DRAM) {
+        assert(tRTP >= tBURST);
+        assert(tRTP > 0);
+        assert(tWR > 0);
+        assert(tWP == 0);
+        assert(tRAS > 0);
+        assert(tRP > 0);
+    } else if (memCellScheme == Enums::NvmWriteBack ||
+               memCellScheme == Enums::NvmWriteThrough) {
+        assert(bankGroupArch == false);
+        assert(tRTP == 0);
+        assert(tWR == 0);
+        assert(tWP > 0);
+        assert(tRAS == 0);
+        assert(tRP == 0);
+        if (memCellScheme == Enums::NvmWriteBack) {
+            *(const_cast<Tick*>(&tRP)) = tWP;
+            *(const_cast<Tick*>(&tWP)) = 0;
+        }
+    } else {
+        panic("Unknown memory cell scheme!");
     }
 
 }
@@ -266,11 +297,25 @@ DRAMCtrl::recvAtomic(PacketPtr pkt)
 {
     DPRINTF(DRAM, "recvAtomic: %s 0x%x\n", pkt->cmdString(), pkt->getAddr());
 
+    assert(AddrRange(pkt->getAddr(),
+                     pkt->getAddr() + (pkt->getSize() - 1)).isSubset(range));
+
     panic_if(pkt->cacheResponding(), "Should not see packets where cache "
              "is responding");
 
     // do the actual memory access and turn the packet into a response
-    access(pkt);
+    if (inAddrMap) {
+        assert(!pkt->physAddrIsValid());
+        access(pkt);
+    } else {
+        Addr phys_addr = pkt->getPhysAddr();
+        Addr translated_addr = pkt->getAddr();
+        pkt->invalidPhysAddr();
+        pkt->setAddr(phys_addr);
+        system()->getPhysMem().access(pkt);
+        pkt->setPhysAddr(phys_addr);
+        pkt->setAddr(translated_addr);
+    }
 
     Tick latency = 0;
     if (pkt->hasData()) {
@@ -619,6 +664,9 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
     DPRINTF(DRAM, "recvTimingReq: request %s addr %lld size %d\n",
             pkt->cmdString(), pkt->getAddr(), pkt->getSize());
 
+    assert(AddrRange(pkt->getAddr(),
+                     pkt->getAddr() + (pkt->getSize() - 1)).isSubset(range));
+
     panic_if(pkt->cacheResponding(), "Should not see packets where cache "
              "is responding");
 
@@ -921,7 +969,18 @@ DRAMCtrl::accessAndRespond(PacketPtr pkt, Tick static_latency)
     bool needsResponse = pkt->needsResponse();
     // do the actual memory access which also turns the packet into a
     // response
-    access(pkt);
+    if (inAddrMap) {
+        assert(!pkt->physAddrIsValid());
+        access(pkt);
+    } else {
+        Addr phys_addr = pkt->getPhysAddr();
+        Addr translated_addr = pkt->getAddr();
+        pkt->invalidPhysAddr();
+        pkt->setAddr(phys_addr);
+        system()->getPhysMem().access(pkt);
+        pkt->setPhysAddr(phys_addr);
+        pkt->setAddr(translated_addr);
+    }
 
     // turn packet around to go back to requester if response expected
     if (needsResponse) {
@@ -960,7 +1019,9 @@ DRAMCtrl::activateBank(Rank& rank_ref, Bank& bank_ref,
 
     // update the open row
     assert(bank_ref.openRow == Bank::NO_ROW);
+    assert(bank_ref.rowState == Bank::RowState::ROW_INVALID);
     bank_ref.openRow = row;
+    bank_ref.rowState = Bank::RowState::ROW_CLEAN;
 
     // start counting anew, this covers both the case when we
     // auto-precharged, and when this access is forced to
@@ -1056,17 +1117,21 @@ DRAMCtrl::prechargeBank(Rank& rank_ref, Bank& bank, Tick pre_at, bool trace)
 {
     // make sure the bank has an open row
     assert(bank.openRow != Bank::NO_ROW);
+    assert(bank.rowState != Bank::RowState::ROW_INVALID);
 
     // sample the bytes per activate here since we are closing
     // the page
     bytesPerActivate.sample(bank.bytesAccessed);
 
     bank.openRow = Bank::NO_ROW;
+    const bool giveUpWB = (memCellScheme == Enums::NvmWriteBack &&
+                           bank.rowState == Bank::RowState::ROW_CLEAN);
+    bank.rowState = Bank::RowState::ROW_INVALID;
 
     // no precharge allowed before this one
     bank.preAllowedAt = pre_at;
 
-    Tick pre_done_at = pre_at + tRP;
+    Tick pre_done_at = ((giveUpWB) ? (pre_at) : (pre_at + tRP));
 
     bank.actAllowedAt = std::max(bank.actAllowedAt, pre_done_at);
 
@@ -1140,6 +1205,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         // Record the activation and deal with all the global timing
         // constraints caused be a new activation (tRRD and tXAW)
         activateBank(rank, bank, act_tick, dram_pkt->row);
+        assert(bank.rowState == Bank::RowState::ROW_CLEAN);
     }
 
     // respect any constraints on the command (e.g. tRCD or tCCD)
@@ -1152,6 +1218,9 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
 
     // update the packet ready time
     dram_pkt->readyTime = cmd_at + tCL + tBURST;
+    if (dram_pkt->isWrite() && memCellScheme == Enums::NvmWriteThrough) {
+            dram_pkt->readyTime += tWP;
+    }
 
     // update the time for the next read/write burst for each
     // bank (add a max with tCCD/tCCD_L/tCCD_L_WR here)
@@ -1174,11 +1243,18 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
                                     tCCD_L : std::max(tCCD_L, wrToRdDly);
                     dly_to_wr_cmd = dram_pkt->isRead() ?
                                     std::max(tCCD_L, rdToWrDly) : tCCD_L_WR;
+                    panic_if(memCellScheme != Enums::DRAM,
+                            "The bank group architecture only supports DRAM\n");
                 } else {
                     // tBURST is default requirement for diff BG timing
                     // Need to also take bus turnaround delays into account
                     dly_to_rd_cmd = dram_pkt->isRead() ? tBURST : wrToRdDly;
                     dly_to_wr_cmd = dram_pkt->isRead() ? rdToWrDly : tBURST;
+                    if (dram_pkt->isWrite() &&
+                        memCellScheme == Enums::NvmWriteThrough) {
+                        dly_to_rd_cmd += tWP;
+                        dly_to_wr_cmd += tWP;
+                    }
                 }
             } else {
                 // different rank is by default in a different bank group and
@@ -1203,6 +1279,15 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
     bank.preAllowedAt = std::max(bank.preAllowedAt,
                                  dram_pkt->isRead() ? cmd_at + tRTP :
                                  dram_pkt->readyTime + tWR);
+    if (dram_pkt->isRead() && memCellScheme != Enums::DRAM) {
+        // assume the data has left the bank
+        bank.preAllowedAt = std::max(bank.preAllowedAt, cmd_at + tBURST);
+    }
+
+    assert(bank.rowState != Bank::RowState::ROW_INVALID);
+    if (dram_pkt->isWrite()) {
+        bank.rowState = Bank::RowState::ROW_DIRTY;
+    }
 
     // increment the bytes accessed and the accesses per row
     bank.bytesAccessed += burstSize;
@@ -2841,8 +2926,22 @@ DRAMCtrl::regStats()
 void
 DRAMCtrl::recvFunctional(PacketPtr pkt)
 {
+    assert(AddrRange(pkt->getAddr(),
+                     pkt->getAddr() + (pkt->getSize() - 1)).isSubset(range));
+
     // rely on the abstract memory
-    functionalAccess(pkt);
+    if (inAddrMap) {
+        assert(!pkt->physAddrIsValid());
+        functionalAccess(pkt);
+    } else {
+        Addr phys_addr = pkt->getPhysAddr();
+        Addr translated_addr = pkt->getAddr();
+        pkt->invalidPhysAddr();
+        pkt->setAddr(phys_addr);
+        system()->getPhysMem().functionalAccess(pkt);
+        pkt->setPhysAddr(phys_addr);
+        pkt->setAddr(translated_addr);
+    }
 }
 
 BaseSlavePort&

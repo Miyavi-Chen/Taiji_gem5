@@ -143,7 +143,7 @@ def create_mem_ctrl(cls, r, i, nbr_mem_ctrls, intlv_bits, intlv_size):
                                       intlvMatch = i)
     return ctrl
 
-def config_mem(options, system):
+def config_ori_mem(options, system):
     """
     Create the memory controllers based on the options and attach them.
 
@@ -241,3 +241,135 @@ def config_mem(options, system):
             subsystem.mem_ctrls[i].device_size = options.hmc_dev_vault_size
         else:
             subsystem.mem_ctrls[i].port = xbar.master
+
+def valid_size_of(container):
+    import math
+    if container is None:
+        return -1
+    else:
+        return len(container)
+
+def create_addr_alignment_mapper(addr_base, original_ranges):
+    from m5.util import convert
+    from m5.objects import AddrRange, CowardAddrMapper
+
+    remapped_ranges = []
+    next_base = addr_base
+    assert(valid_size_of(original_ranges) > 0)
+    for rg in original_ranges:
+        remapped_ranges.append(AddrRange(next_base, size = rg.size()))
+        next_base = next_base + rg.size()
+
+    assert(valid_size_of(original_ranges) == valid_size_of(remapped_ranges))
+    return CowardAddrMapper(original_ranges = original_ranges, \
+                            remapped_ranges = remapped_ranges)
+
+def create_home_agent(phys_ranges, channel_ranges):
+    from m5.util import convert
+    from m5.objects import AddrRange, HomeAgent
+
+    mem_ranges = []
+    next_base = convert.toMemorySize('0')
+    assert(valid_size_of(phys_ranges) > 0)
+    for rg in phys_ranges:
+        mem_ranges.append(AddrRange(next_base, size = rg.size()))
+        next_base = next_base + rg.size()
+
+    assert(valid_size_of(phys_ranges) == valid_size_of(mem_ranges))
+    assert(valid_size_of(channel_ranges) > 0)
+    return HomeAgent(phys_ranges = phys_ranges, mem_ranges = mem_ranges, \
+                     channel_ranges = channel_ranges)
+
+def create_mem_subsystem(options, system, intlv_size, disabel_kvm_map):
+    import math
+    from m5.util import fatal, convert
+    from m5.objects import Addr, AddrRange, PortForwarder, SimpleMemory
+
+    if options.mem_type != "MemSubsystem":
+        fatal("options.mem_type != 'MemSubsystem'")
+
+    if getattr(options, "tlm_memory", None):
+        fatal("tlm_memory")
+
+    if getattr(options, "external_memory_system", None):
+        fatal("external_memory_system")
+
+    if getattr(options, "elastic_trace_en", False):
+        fatal("elastic_trace_en")
+
+    if options.mem_channels != 1:
+        fatal("options.mem_channels != 1")
+
+    if options.num_dirs != 1:
+        fatal("options.num_dirs != 1")
+
+    if getattr(options, "mem_ranks", None):
+        fatal("mem_ranks")
+
+    split_char = ';'
+    channel_forwarder = PortForwarder()
+    channel_ranges = []
+    channel_sizes = options.channel_sizes.split(split_char)
+    channel_types = options.channel_types.split(split_char)
+    to_channel_addr = []
+    mem_ctrls = []
+    phys_ranges = []
+
+    mem_space_size = convert.toMemorySize('0')
+    assert(valid_size_of(channel_sizes) > 0)
+    for sz in [convert.toMemorySize(x) for x in channel_sizes]:
+        channel_ranges.append(AddrRange(mem_space_size, size = sz))
+        mem_space_size = mem_space_size + sz
+    assert(mem_space_size >= (sum(rg.size() for rg in system.mem_ranges)))
+
+    assert(valid_size_of(channel_types) > 0)
+    for tp in channel_types:
+        assert(issubclass(get(tp), m5.objects.DRAMCtrl))
+        assert(tp != "HMC_2500_1x32")
+
+    assert(valid_size_of(channel_types) == valid_size_of(channel_ranges))
+    assert(valid_size_of(channel_ranges) > 0)
+    for idx in range(len(channel_ranges)):
+        mapper = create_addr_alignment_mapper( \
+                    convert.toMemorySize('0'), [channel_ranges[idx]])
+        assert(valid_size_of(mapper.remapped_ranges) == 1)
+        mem_ctrl = create_mem_ctrl(get(channel_types[idx]), \
+                   mapper.remapped_ranges[0], 0, 1, 0, intlv_size)
+        mem_ctrl.in_addr_map = False
+        mem_ctrl.kvm_map = False
+
+        channel_forwarder.master = mapper.slave
+        mapper.master = mem_ctrl.port
+        to_channel_addr.append(mapper)
+        mem_ctrls.append(mem_ctrl)
+
+    assert(valid_size_of(system.mem_ranges) > 0)
+    for rg in system.mem_ranges:
+        phys_range = SimpleMemory(range = rg)
+        if disabel_kvm_map:
+            phys_range.kvm_map = False
+        phys_ranges.append(phys_range)
+
+    home_agent = create_home_agent(system.mem_ranges, channel_ranges)
+    home_agent.master = channel_forwarder.slave
+
+    system.mem_subsystem = home_agent
+    system.channel_forwarder = channel_forwarder
+    system.to_channel_addr = to_channel_addr
+    system.mem_ctrls = mem_ctrls
+    system.phys_data = phys_ranges
+
+    system.mmap_using_noreserve = True
+    return system.mem_subsystem
+
+def config_mem_subsystem(options, system):
+    import math
+    intlv_size = max(128, system.cache_line_size.value)
+    mem_subsystem = create_mem_subsystem(options, system, intlv_size, False)
+    system.membus.master = mem_subsystem.slave
+
+def config_mem(options, system):
+    if options.mem_type == "MemSubsystem":
+        config_mem_subsystem(options, system)
+    else:
+        config_ori_mem(options, system)

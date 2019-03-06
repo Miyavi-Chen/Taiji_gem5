@@ -328,6 +328,10 @@ class Packet : public Printable
     RequestPtr req;
 
   private:
+
+    bool physAddrValid;
+    Addr physAddr;
+
    /**
     * A pointer to the data being transferred. It can be different
     * sizes at each level of the hierarchy so it belongs to the
@@ -724,6 +728,15 @@ class Packet : public Printable
 
     void copyError(Packet *pkt) { assert(pkt->isError()); cmd = pkt->cmd; }
 
+    bool physAddrIsValid() const { return physAddrValid; }
+
+    void invalidPhysAddr() { assert(physAddrValid); physAddrValid = false; }
+
+    Addr getPhysAddr() const { assert(physAddrValid); return physAddr; }
+
+    void setPhysAddr(Addr _addr) { assert(!physAddrValid);
+                                   physAddrValid = true; physAddr = _addr; }
+
     Addr getAddr() const { assert(flags.isSet(VALID_ADDR)); return addr; }
     /**
      * Update the address of this packet mid-transaction. This is used
@@ -789,6 +802,7 @@ class Packet : public Printable
      */
     Packet(const RequestPtr &_req, MemCmd _cmd)
         :  cmd(_cmd), id((PacketId)_req.get()), req(_req),
+           physAddrValid(false), physAddr(0),
            data(nullptr), addr(0), _isSecure(false), size(0),
            _qosValue(0), headerDelay(0), snoopDelay(0),
            payloadDelay(0), senderState(NULL)
@@ -811,6 +825,7 @@ class Packet : public Printable
      */
     Packet(const RequestPtr &_req, MemCmd _cmd, int _blkSize, PacketId _id = 0)
         :  cmd(_cmd), id(_id ? _id : (PacketId)_req.get()), req(_req),
+           physAddrValid(false), physAddr(0),
            data(nullptr), addr(0), _isSecure(false),
            _qosValue(0), headerDelay(0),
            snoopDelay(0), payloadDelay(0), senderState(NULL)
@@ -833,6 +848,7 @@ class Packet : public Printable
      */
     Packet(const PacketPtr pkt, bool clear_flags, bool alloc_data)
         :  cmd(pkt->cmd), id(pkt->id), req(pkt->req),
+           physAddrValid(pkt->physAddrValid), physAddr(pkt->physAddr),
            data(nullptr),
            addr(pkt->addr), _isSecure(pkt->_isSecure), size(pkt->size),
            bytesValid(pkt->bytesValid),

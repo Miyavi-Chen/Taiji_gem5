@@ -70,3 +70,32 @@ class RangeAddrMapper(AddrMapper):
         "Ranges of memory that should me remapped")
     remapped_ranges = VectorParam.AddrRange(
         "Ranges of memory that are being mapped to")
+
+class CowardAddrMapper(MemObject):
+    type = 'CowardAddrMapper'
+    cxx_header = 'mem/coward_addr_mapper.hh'
+
+    slave = SlavePort("Slave port")
+    master = MasterPort("Master port")
+
+    original_ranges = VectorParam.AddrRange(
+        "Ranges of memory that should me remapped")
+    remapped_ranges = VectorParam.AddrRange(
+        "Ranges of memory that are being mapped to")
+
+    verbose = Param.Bool(False, "print information")
+
+class HomeAgent(MemObject):
+    type = 'HomeAgent'
+    cxx_header = 'mem/home_agent.hh'
+
+    slave = SlavePort("Slave port")
+    master = MasterPort("Master port")
+
+    phys_ranges = VectorParam.AddrRange(
+        "Ranges of memory that should me remapped")
+    mem_ranges = VectorParam.AddrRange(
+        "Ranges of memory that are being mapped to")
+    channel_ranges = VectorParam.AddrRange("Ranges of real memory controllers")
+
+    verbose = Param.Bool(False, "print information")

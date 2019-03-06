@@ -82,7 +82,7 @@ def addNoISAOptions(parser):
     parser.add_option("--list-mem-types",
                       action="callback", callback=_listMemTypes,
                       help="List available memory types")
-    parser.add_option("--mem-type", type="choice", default="DDR3_1600_8x8",
+    parser.add_option("--mem-type", type="choice", default="MemSubsystem",
                       choices=MemConfig.mem_names(),
                       help = "type of memory to use")
     parser.add_option("--mem-channels", type="int", default=1,
@@ -138,6 +138,19 @@ def addNoISAOptions(parser):
              "sets max_insts_all_threads for cpus 0, 1, 3, 5 and 7 "
              "Direct parameters of the root object are not accessible, "
              "only parameters of its children.")
+
+def addMemSubsystemOptions(parser):
+    # memory subsystem options
+    parser.add_option("--channel-sizes", type="string", action="store",
+                      default="3GB;13GB",
+                      help="The sizes of the memory controller in the memory "
+                      "subsystem, enabled by --mem-type=MemSubsystem, "
+                      "separated by ';' ")
+    parser.add_option("--channel-types", type="string", action="store",
+                      default="DDR4_2400_8x8;DDR4_2400_8x8",
+                      help="The types of the memory controller in the memory "
+                      "subsystem, enabled by --mem-type=MemSubsystem, "
+                      "separated by ';' ")
 
 # Add common options that assume a non-NULL ISA.
 def addCommonOptions(parser):

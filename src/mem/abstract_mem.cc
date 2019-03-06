@@ -329,6 +329,8 @@ AbstractMemory::access(PacketPtr pkt)
       return;
     }
 
+    assert(!pkt->physAddrIsValid());
+
     assert(AddrRange(pkt->getAddr(),
                      pkt->getAddr() + (pkt->getSize() - 1)).isSubset(range));
 
@@ -420,6 +422,8 @@ AbstractMemory::access(PacketPtr pkt)
 void
 AbstractMemory::functionalAccess(PacketPtr pkt)
 {
+    assert(!pkt->physAddrIsValid());
+
     assert(AddrRange(pkt->getAddr(),
                      pkt->getAddr() + pkt->getSize() - 1).isSubset(range));
 

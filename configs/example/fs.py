@@ -287,6 +287,7 @@ def build_drive_system(np):
 # Add options
 parser = optparse.OptionParser()
 Options.addCommonOptions(parser)
+Options.addMemSubsystemOptions(parser)
 Options.addFSOptions(parser)
 
 # Add the ruby specific and protocol specific options

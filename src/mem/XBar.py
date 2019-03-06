@@ -191,3 +191,15 @@ class IOXBar(NoncoherentXBar):
     frontend_latency = 2
     forward_latency = 1
     response_latency = 2
+
+class ZeroXBar(MemObject):
+    type = 'ZeroXBar'
+    abstract = True
+    cxx_header = "mem/zero_xbar.hh"
+
+    slave = VectorSlavePort("Vector port for connecting masters")
+    master = VectorMasterPort("Vector port for connecting slaves")
+
+class PortForwarder(ZeroXBar):
+    type = 'PortForwarder'
+    cxx_header = "mem/port_forwarder.hh"

@@ -85,7 +85,7 @@ def define_options(parser):
     eval("%s.define_options(parser)" % protocol)
     Network.define_options(parser)
 
-def setup_memory_controllers(system, ruby, dir_cntrls, options):
+def setup_ori_memory_controllers(system, ruby, dir_cntrls, options):
     ruby.block_size_bytes = options.cacheline_size
     ruby.memory_size_bits = 48
 
@@ -136,6 +136,43 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
 
     if len(crossbars) > 0:
         ruby.crossbars = crossbars
+
+def setup_mem_subsystem(system, ruby, dir_cntrls, options):
+    import math
+    from m5.util import fatal
+
+    ruby.block_size_bytes = options.cacheline_size
+    ruby.memory_size_bits = 48
+
+    if len(dir_cntrls) != 1:
+        fatal("len(dir_cntrls) != 1")
+
+    if options.numa_high_bit:
+        intlv_size = 2 ** (options.numa_high_bit + 1)
+    else:
+        intlv_size = options.cacheline_size
+
+    disabel_kvm_map = False
+    if options.access_backing_store:
+        disabel_kvm_map = True
+
+    mem_subsystem = MemConfig.create_mem_subsystem( \
+                              options, system, intlv_size, disabel_kvm_map)
+    dir_cntrls[0].addr_ranges = mem_subsystem.phys_ranges
+
+    if len(mem_subsystem.phys_ranges) > 1:
+        crossbar = IOXBar()
+        dir_cntrls[0].memory = crossbar.slave
+        crossbar.master = mem_subsystem.slave
+        ruby.crossbars = [crossbar]
+    else:
+        dir_cntrls[0].memory = mem_subsystem.slave
+
+def setup_memory_controllers(system, ruby, dir_cntrls, options):
+    if options.mem_type == "MemSubsystem":
+        setup_mem_subsystem(system, ruby, dir_cntrls, options)
+    else:
+        setup_ori_memory_controllers(system, ruby, dir_cntrls, options)
 
 
 def create_topology(controllers, options):

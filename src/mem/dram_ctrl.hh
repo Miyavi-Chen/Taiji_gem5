@@ -64,6 +64,7 @@
 #include "enums/AddrMap.hh"
 #include "enums/MemSched.hh"
 #include "enums/PageManage.hh"
+#include "enums/MemCellScheme.hh"
 #include "mem/drampower.hh"
 #include "mem/qos/mem_ctrl.hh"
 #include "mem/qport.hh"
@@ -172,6 +173,12 @@ class DRAMCtrl : public QoS::MemCtrl
 
       public:
 
+        enum RowState {
+            ROW_INVALID = 0,
+            ROW_CLEAN,
+            ROW_DIRTY,
+        };
+
         static const uint32_t NO_ROW = -1;
 
         uint32_t openRow;
@@ -186,10 +193,12 @@ class DRAMCtrl : public QoS::MemCtrl
         uint32_t rowAccesses;
         uint32_t bytesAccessed;
 
+        RowState rowState;
+
         Bank() :
             openRow(NO_ROW), bank(0), bankgr(0),
             rdAllowedAt(0), wrAllowedAt(0), preAllowedAt(0), actAllowedAt(0),
-            rowAccesses(0), bytesAccessed(0)
+            rowAccesses(0), bytesAccessed(0), rowState(RowState::ROW_INVALID)
         { }
     };
 
@@ -988,6 +997,7 @@ class DRAMCtrl : public QoS::MemCtrl
     const Tick tRTW;
     const Tick tCS;
     const Tick tBURST;
+    const Tick tWP;
     const Tick tCCD_L_WR;
     const Tick tCCD_L;
     const Tick tRCD;
@@ -1015,6 +1025,7 @@ class DRAMCtrl : public QoS::MemCtrl
     Enums::MemSched memSchedPolicy;
     Enums::AddrMap addrMapping;
     Enums::PageManage pageMgmt;
+    const Enums::MemCellScheme memCellScheme;
 
     /**
      * Max column accesses (read and write) per row, before forcefully

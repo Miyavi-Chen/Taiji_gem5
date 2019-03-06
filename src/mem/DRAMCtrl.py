@@ -66,6 +66,8 @@ class AddrMap(Enum): vals = ['RoRaBaChCo', 'RoRaBaCoCh', 'RoCoRaBaCh']
 class PageManage(Enum): vals = ['open', 'open_adaptive', 'close',
                                 'close_adaptive']
 
+class MemCellScheme(Enum): vals = ['DRAM', 'NvmWriteThrough', 'NvmWriteBack']
+
 # DRAMCtrl is a single-channel single-ported DRAM controller model
 # that aims to model the most important system-level performance
 # effects of a DRAM without getting into too much detail of the DRAM
@@ -225,6 +227,18 @@ class DRAMCtrl(QoSMemCtrl):
     # time to exit power-down mode
     # Exit power-down to next valid command delay
     tXP = Param.Latency("0ns", "Power-up Delay")
+
+    mem_cell_scheme = Param.MemCellScheme('DRAM', "cell type and scheme")
+
+    tWP = Param.Latency("0ns", "NVM write penalty")
+    # MLC RESET pulse time.
+    tWP00 = Param.Latency("0ns", "RESET pulse time")
+    # MLC SET pulse time.
+    tWP01 = Param.Latency("0ns", "SET 01 pulse time")
+    # MLC SET pulse time.
+    tWP10 = Param.Latency("0ns", "SET 10 pulse time")
+    # MLC SET pulse time.
+    tWP11 = Param.Latency("0ns", "SET 11 pulse time")
 
     # Exit Powerdown to commands requiring a locked DLL
     tXPDLL = Param.Latency("0ns", "Power-up Delay with locked DLL")
@@ -1195,3 +1209,106 @@ class HBM_1000_4H_1x64(HBM_1000_4H_1x128):
 
     # self refresh exit time
     tXS = '65ns'
+
+class MemSubsystem(AbstractMemory):
+    # # # # # # # # # # # # # # # # # #
+    #                                 #
+    #  The configuration depends on:  #
+    #     1) --channel-sizes          #
+    #     2) --channel-types          #
+    #                                 #
+    # # # # # # # # # # # # # # # # # #
+    pass
+
+class PCM_LPDDR2_400_8x8(DRAMCtrl):
+    # size of device
+    device_size = '128MB'
+
+    # 8x8 configuration, 1 device with a 8-bit interface
+    device_bus_width = 8
+    burst_length = 8
+    # Each device has a page (row buffer) size of 1KB
+    device_rowbuffer_size = '1kB'
+    # 8x8 configuration, so 8 device
+    devices_per_rank = 8
+    ranks_per_channel = 1
+
+    banks_per_rank = 2
+
+    # No DLL for LPDDR2
+    dll = False
+
+    # 400 MHz
+    tCK = '2.5ns'
+
+    tRCD = '120ns'
+
+    # Assumes data is ready at the global sense amps after tRCD
+    tCL = '2.5ns'
+
+    # Precharge isn't needed. Writes occur only if needed
+    # and take tWP time during a precharge (write-back)
+    # or immediately (write-through)
+    tRP = '0ns'
+
+    # No row restoration needed
+    tRAS = '0ns'
+
+    # write-to-precharge, not needed here
+    tWR = '0ns'
+
+    # No precharge, but still need to wait for data to leave internal
+    # FIFO buffers. 3cycles
+    tRTP = '0ns'
+
+    tBURST = '10ns'
+
+    # No needed, but still leave it here
+    tRFC = '1ns'
+
+    # 'tREFI' is a garbage value
+    tREFI = '78000s'
+
+    # Irrespective of speed grade, tWTR is 7.5 ns
+    tWTR = '7.5ns'
+
+    # Default same rank rd-to-wr bus turnaround to 2 CK, @400 MHz = 5 ns
+    tRTW = '5ns'
+
+    # Default different rank bus delay to 2 CK, @400 MHz = 5 ns
+    tCS = '5ns'
+
+    # Activate to activate irrespective of density and speed grade
+    tRRD = '10.0ns'
+
+    tXAW = '40ns'
+    activation_limit = 4
+
+    tXP = '7.5ns'
+    tXS = '7.5ns'
+
+    page_policy = 'close_adaptive'
+    mem_cell_scheme = 'NvmWriteBack'
+
+    # 'tWP' is a garbage value = tWP00
+    tWP = '100ns'
+
+    tWP00 = '100ns'
+    tWP01 = '1050ns'
+    tWP10 = '750ns'
+    tWP11 = '150ns'
+
+    IDD0 = '0.46mA'
+
+    IDD2N = '0.08mA'
+
+    IDD3N = '0.08mA'
+
+    IDD4W = '92.32mA'
+
+    IDD4R = '2.25mA'
+
+    #  No refresh in default
+    IDD5 = '0mA'
+
+    VDD = '1.8V'

@@ -119,6 +119,7 @@ def get_processes(options):
 
 parser = optparse.OptionParser()
 Options.addCommonOptions(parser)
+Options.addMemSubsystemOptions(parser)
 Options.addSEOptions(parser)
 
 if '--ruby' in sys.argv:
