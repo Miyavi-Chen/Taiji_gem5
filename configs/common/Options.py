@@ -141,6 +141,10 @@ def addNoISAOptions(parser):
 
 def addMemSubsystemOptions(parser):
     # memory subsystem options
+    parser.add_option("--channel-intlv-size", type="string", action="store",
+                      default="0B",
+                      help="Interleaved size between channels, enabled by "
+                      "--mem-type=MemSubsystem, set to 0 to disable ")
     parser.add_option("--channel-sizes", type="string", action="store",
                       default="3GB;13GB",
                       help="The sizes of the memory controller in the memory "

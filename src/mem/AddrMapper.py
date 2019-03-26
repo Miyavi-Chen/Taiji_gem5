@@ -36,6 +36,7 @@
 # Authors: Andreas Hansson
 
 from m5.params import *
+from m5.proxy import *
 from m5.objects.MemObject import MemObject
 
 # An address mapper changes the packet addresses in going from the
@@ -83,7 +84,7 @@ class CowardAddrMapper(MemObject):
     remapped_ranges = VectorParam.AddrRange(
         "Ranges of memory that are being mapped to")
 
-    verbose = Param.Bool(False, "print information")
+    verbose = Param.Bool(False, "Print information")
 
 class HomeAgent(MemObject):
     type = 'HomeAgent'
@@ -96,6 +97,43 @@ class HomeAgent(MemObject):
         "Ranges of memory that should me remapped")
     mem_ranges = VectorParam.AddrRange(
         "Ranges of memory that are being mapped to")
-    channel_ranges = VectorParam.AddrRange("Ranges of real memory controllers")
 
-    verbose = Param.Bool(False, "print information")
+    verbose = Param.Bool(False, "Print information")
+
+class FlexMem(MemObject):
+    type = 'FlexMem'
+    cxx_header = 'mem/flex_mem.hh'
+
+    slave = SlavePort("Slave port")
+    master = MasterPort("Master port")
+
+    mem_ranges = VectorParam.AddrRange(
+        "Ranges of memory that should me remapped")
+    channel_ranges = VectorParam.AddrRange(
+        "Ranges of memory that are being mapped to")
+
+    verbose = Param.Bool(False, "Print information")
+    sys = Param.System(Parent.any, "System we belong to")
+    intlv_size = Param.MemorySize("Channel interleaving size")
+
+class HybridMem(MemObject):
+    type = 'HybridMem'
+    cxx_header = 'mem/hybrid_mem.hh'
+
+    slave = SlavePort("Slave port")
+    master = MasterPort("Master port")
+
+    phys_ranges = VectorParam.AddrRange(
+        "Ranges of original physical address")
+    mem_ranges = VectorParam.AddrRange(
+        "Ranges of memory that should me remapped")
+    channel_ranges = VectorParam.AddrRange(
+        "Ranges of memory that are being mapped to")
+
+    verbose = Param.Bool(False, "Print information")
+    sys = Param.System(Parent.any, "System we belong to")
+    granularity = Param.MemorySize('4kB', "Granular size for mapping")
+    header_delay = Param.Cycles(1, "Header delay")
+    width = Param.Unsigned(16, "Datapath width per port (bytes)")
+    max_migration_tasks = Param.Unsigned(8,
+        "Number of pages migrated at the same time")

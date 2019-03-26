@@ -264,7 +264,7 @@ def create_addr_alignment_mapper(addr_base, original_ranges):
     return CowardAddrMapper(original_ranges = original_ranges, \
                             remapped_ranges = remapped_ranges)
 
-def create_home_agent(phys_ranges, channel_ranges):
+def create_home_agent(phys_ranges):
     from m5.util import convert
     from m5.objects import AddrRange, HomeAgent
 
@@ -276,14 +276,13 @@ def create_home_agent(phys_ranges, channel_ranges):
         next_base = next_base + rg.size()
 
     assert(valid_size_of(phys_ranges) == valid_size_of(mem_ranges))
-    assert(valid_size_of(channel_ranges) > 0)
-    return HomeAgent(phys_ranges = phys_ranges, mem_ranges = mem_ranges, \
-                     channel_ranges = channel_ranges)
+    return HomeAgent(phys_ranges = phys_ranges, mem_ranges = mem_ranges)
 
-def create_mem_subsystem(options, system, intlv_size, disabel_kvm_map):
+def create_mem_subsystem(options, system, intlv_size, disable_kvm_map):
     import math
     from m5.util import fatal, convert
-    from m5.objects import Addr, AddrRange, PortForwarder, SimpleMemory
+    from m5.objects import Addr, AddrRange
+    from m5.objects import FlexMem, HybridMem, PortForwarder, SimpleMemory
 
     if options.mem_type != "MemSubsystem":
         fatal("options.mem_type != 'MemSubsystem'")
@@ -313,7 +312,7 @@ def create_mem_subsystem(options, system, intlv_size, disabel_kvm_map):
     channel_types = options.channel_types.split(split_char)
     to_channel_addr = []
     mem_ctrls = []
-    phys_ranges = []
+    phys_data = []
 
     mem_space_size = convert.toMemorySize('0')
     assert(valid_size_of(channel_sizes) > 0)
@@ -331,10 +330,10 @@ def create_mem_subsystem(options, system, intlv_size, disabel_kvm_map):
     assert(valid_size_of(channel_ranges) > 0)
     for idx in range(len(channel_ranges)):
         mapper = create_addr_alignment_mapper( \
-                    convert.toMemorySize('0'), [channel_ranges[idx]])
+                convert.toMemorySize('0'), [channel_ranges[idx]])
         assert(valid_size_of(mapper.remapped_ranges) == 1)
         mem_ctrl = create_mem_ctrl(get(channel_types[idx]), \
-                   mapper.remapped_ranges[0], 0, 1, 0, intlv_size)
+                mapper.remapped_ranges[0], 0, 1, 0, intlv_size)
         mem_ctrl.in_addr_map = False
         mem_ctrl.kvm_map = False
 
@@ -345,28 +344,59 @@ def create_mem_subsystem(options, system, intlv_size, disabel_kvm_map):
 
     assert(valid_size_of(system.mem_ranges) > 0)
     for rg in system.mem_ranges:
-        phys_range = SimpleMemory(range = rg)
-        if disabel_kvm_map:
-            phys_range.kvm_map = False
-        phys_ranges.append(phys_range)
+        data = SimpleMemory(range = rg)
+        if disable_kvm_map:
+            data.kvm_map = False
+        phys_data.append(data)
 
-    home_agent = create_home_agent(system.mem_ranges, channel_ranges)
-    home_agent.master = channel_forwarder.slave
+    home_agent = create_home_agent(system.mem_ranges)
+
+    if convert.toMemorySize(options.channel_intlv_size) == 0:
+        hybrid_mem = HybridMem(phys_ranges = home_agent.phys_ranges, \
+                               mem_ranges = home_agent.mem_ranges, \
+                               channel_ranges = channel_ranges)
+        home_agent.master = hybrid_mem.slave
+        hybrid_mem.master = channel_forwarder.slave
+        system.hybrid_mem = hybrid_mem
+    elif convert.toMemorySize(options.channel_intlv_size) > 0:
+        flex_mem = FlexMem(mem_ranges = home_agent.mem_ranges, \
+                           channel_ranges = channel_ranges, \
+                           intlv_size = options.channel_intlv_size)
+        home_agent.master = flex_mem.slave
+        flex_mem.master = channel_forwarder.slave
+        system.flex_mem = flex_mem
+    else:
+        fatal("impossible")
 
     system.mem_subsystem = home_agent
     system.channel_forwarder = channel_forwarder
     system.to_channel_addr = to_channel_addr
     system.mem_ctrls = mem_ctrls
-    system.phys_data = phys_ranges
+    system.phys_data = phys_data
 
     system.mmap_using_noreserve = True
     return system.mem_subsystem
 
 def config_mem_subsystem(options, system):
     import math
+    from m5.objects import CowardAddrMapper, PortForwarder
+
     intlv_size = max(128, system.cache_line_size.value)
+
+    system_mem_range_port = []
+    mem_subsystem_forwarder = PortForwarder()
     mem_subsystem = create_mem_subsystem(options, system, intlv_size, False)
-    system.membus.master = mem_subsystem.slave
+    mem_subsystem_forwarder.master = mem_subsystem.slave
+
+    for rg in system.mem_ranges:
+        range_port = CowardAddrMapper( \
+                original_ranges = rg, remapped_ranges = rg)
+        system.membus.master = range_port.slave
+        range_port.master = mem_subsystem_forwarder.slave
+        system_mem_range_port.append(range_port)
+
+    system.system_mem_range_port = system_mem_range_port
+    system.mem_subsystem_forwarder = mem_subsystem_forwarder
 
 def config_mem(options, system):
     if options.mem_type == "MemSubsystem":

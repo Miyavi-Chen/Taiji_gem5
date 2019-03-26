@@ -45,7 +45,6 @@ HomeAgent::HomeAgent(const HomeAgentParams* p)
       masterPort(name() + ".master", *this),
       physRanges(p->phys_ranges),
       memRanges(p->mem_ranges),
-      channelRanges(p->channel_ranges),
       verbose(p->verbose)
 {
     if (physRanges.size() != memRanges.size())
@@ -63,7 +62,7 @@ void
 HomeAgent::init()
 {
     if (!slavePort.isConnected() || !masterPort.isConnected()) {
-        fatal("Address mapper is not connected on both sides.\n");
+        fatal("HomeAgent is not connected on both sides.\n");
     }
 
     if (verbose) {
@@ -158,7 +157,7 @@ HomeAgent::recvTimingReq(PacketPtr pkt)
     bool cacheResponding = pkt->cacheResponding();
 
     if (needsResponse && !cacheResponding) {
-        pkt->pushSenderState(new HomeAgentPhysSenderState(phys_addr));
+        pkt->pushSenderState(new HomeAgentSenderState(phys_addr));
     }
 
     pkt->setPhysAddr(phys_addr);
@@ -171,7 +170,6 @@ HomeAgent::recvTimingReq(PacketPtr pkt)
     if (!successful) {
         pkt->invalidPhysAddr();
         pkt->setAddr(phys_addr);
-
         if (needsResponse) {
             delete pkt->popSenderState();
         }
@@ -183,21 +181,22 @@ HomeAgent::recvTimingReq(PacketPtr pkt)
 bool
 HomeAgent::recvTimingResp(PacketPtr pkt)
 {
-    HomeAgentPhysSenderState* physReceivedState =
-        dynamic_cast<HomeAgentPhysSenderState*>(pkt->senderState);
+    HomeAgentSenderState* receivedState =
+        dynamic_cast<HomeAgentSenderState*>(pkt->senderState);
 
     // Restore initial sender state
-    if (physReceivedState == NULL)
+    if (receivedState == NULL) {
         panic("HomeAgent %s got a response without sender state\n",
               name());
+    }
 
     const Addr phys_addr = pkt->getPhysAddr();
     const Addr mem_addr = pkt->getAddr();
 
     // Restore the state and address
-    pkt->senderState = physReceivedState->predecessor;
+    pkt->senderState = receivedState->predecessor;
     pkt->invalidPhysAddr();
-    pkt->setAddr(physReceivedState->physAddr);
+    pkt->setAddr(receivedState->physAddr);
 
     // Attempt to send the packet
     bool successful = slavePort.sendTimingResp(pkt);
@@ -205,11 +204,11 @@ HomeAgent::recvTimingResp(PacketPtr pkt)
     // If packet successfully sent, delete the sender state, otherwise
     // restore state
     if (successful) {
-        delete physReceivedState;
+        delete receivedState;
     } else {
         // Don't delete anything and let the packet look like we did
         // not touch it
-        pkt->senderState = physReceivedState;
+        pkt->senderState = receivedState;
         pkt->setPhysAddr(phys_addr);
         pkt->setAddr(mem_addr);
     }
@@ -231,8 +230,9 @@ HomeAgent::recvTimingSnoopResp(PacketPtr pkt)
 bool
 HomeAgent::isSnooping() const
 {
-    if (slavePort.isSnooping())
+    if (slavePort.isSnooping()) {
         fatal("HomeAgent doesn't support remapping of snooping requests\n");
+    }
     return false;
 }
 

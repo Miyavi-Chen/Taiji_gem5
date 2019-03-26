@@ -139,6 +139,7 @@ def setup_ori_memory_controllers(system, ruby, dir_cntrls, options):
 
 def setup_mem_subsystem(system, ruby, dir_cntrls, options):
     import math
+    from m5.objects import CowardAddrMapper, PortForwarder
     from m5.util import fatal
 
     ruby.block_size_bytes = options.cacheline_size
@@ -152,21 +153,41 @@ def setup_mem_subsystem(system, ruby, dir_cntrls, options):
     else:
         intlv_size = options.cacheline_size
 
-    disabel_kvm_map = False
+    disable_kvm_map = False
     if options.access_backing_store:
-        disabel_kvm_map = True
+        disable_kvm_map = True
 
+    system_mem_range_port = []
+    mem_subsystem_forwarder = PortForwarder()
     mem_subsystem = MemConfig.create_mem_subsystem( \
-                              options, system, intlv_size, disabel_kvm_map)
-    dir_cntrls[0].addr_ranges = mem_subsystem.phys_ranges
+            options, system, intlv_size, disable_kvm_map)
+    mem_subsystem_forwarder.master = mem_subsystem.slave
 
-    if len(mem_subsystem.phys_ranges) > 1:
+    if len(system.mem_ranges) > 1:
         crossbar = IOXBar()
         dir_cntrls[0].memory = crossbar.slave
-        crossbar.master = mem_subsystem.slave
+
+        for rg in system.mem_ranges:
+            range_port = CowardAddrMapper( \
+                    original_ranges = rg, remapped_ranges = rg)
+            crossbar.master = range_port.slave
+            range_port.master = mem_subsystem_forwarder.slave
+            system_mem_range_port.append(range_port)
+
         ruby.crossbars = [crossbar]
     else:
-        dir_cntrls[0].memory = mem_subsystem.slave
+        assert(MemConfig.valid_size_of(system.mem_ranges) == 1)
+        rg = system.mem_ranges[0]
+        range_port = CowardAddrMapper( \
+                original_ranges = rg, remapped_ranges = rg)
+        dir_cntrls[0].memory = range_port.slave
+        range_port.master = mem_subsystem_forwarder.slave
+        system_mem_range_port.append(range_port)
+
+    system.system_mem_range_port = system_mem_range_port
+    system.mem_subsystem_forwarder = mem_subsystem_forwarder
+
+    dir_cntrls[0].addr_ranges = system.mem_ranges
 
 def setup_memory_controllers(system, ruby, dir_cntrls, options):
     if options.mem_type == "MemSubsystem":
