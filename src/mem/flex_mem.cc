@@ -167,23 +167,17 @@ FlexMem::init()
     }
 }
 
-BaseSlavePort&
-FlexMem::getSlavePort(const std::string& if_name, PortID idx)
-{
-    if (if_name == "slave") {
-        return slavePort;
-    } else {
-        return MemObject::getSlavePort(if_name, idx);
-    }
-}
-
-BaseMasterPort&
-FlexMem::getMasterPort(const std::string& if_name, PortID idx)
+Port &
+FlexMem::getPort(const std::string &if_name, PortID idx)
 {
     if (if_name == "master") {
+        // the master port index translates directly to the vector position
         return masterPort;
+    } else if (if_name == "slave") {
+        // the slave port index translates directly to the vector position
+        return slavePort;
     } else {
-        return MemObject::getMasterPort(if_name, idx);
+        return MemObject::getPort(if_name, idx);
     }
 }
 

@@ -75,25 +75,17 @@ ZeroXBar::init()
 {
 }
 
-BaseMasterPort &
-ZeroXBar::getMasterPort(const std::string &if_name, PortID idx)
+Port &
+ZeroXBar::getPort(const std::string &if_name, PortID idx)
 {
     if (if_name == "master" && idx < masterPorts.size()) {
         // the master port index translates directly to the vector position
         return *masterPorts[idx];
-    } else {
-        return MemObject::getMasterPort(if_name, idx);
-    }
-}
-
-BaseSlavePort &
-ZeroXBar::getSlavePort(const std::string &if_name, PortID idx)
-{
-    if (if_name == "slave" && idx < slavePorts.size()) {
+    } else if (if_name == "slave" && idx < slavePorts.size()) {
         // the slave port index translates directly to the vector position
         return *slavePorts[idx];
     } else {
-        return MemObject::getSlavePort(if_name, idx);
+        return MemObject::getPort(if_name, idx);
     }
 }
 
