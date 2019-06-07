@@ -295,6 +295,7 @@ def build_drive_system(np):
 # Add options
 parser = optparse.OptionParser()
 Options.addCommonOptions(parser)
+Options.addXBarOptions(parser)
 Options.addMemSubsystemOptions(parser)
 Options.addFSOptions(parser)
 

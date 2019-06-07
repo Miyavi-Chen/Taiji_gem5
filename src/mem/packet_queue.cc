@@ -52,7 +52,8 @@ PacketQueue::PacketQueue(EventManager& _em, const std::string& _label,
                          bool force_order,
                          bool disable_sanity_check)
     : em(_em), sendEvent([this]{ processSendEvent(); }, _sendEventName),
-      _disableSanityCheck(disable_sanity_check),
+      _disableSanityCheck(true),
+      transmitListMaxSize(100),
       forceOrder(force_order),
       label(_label), waitingOnRetry(false)
 {
@@ -115,6 +116,14 @@ PacketQueue::schedSendTiming(PacketPtr pkt, Tick when)
 
     // express snoops should never be queued
     assert(!pkt->isExpressSnoop());
+    
+    if (transmitListMaxSize < transmitList.size()) {
+        transmitListMaxSize = transmitList.size();
+        std::cout
+            << "transmitListMaxSize=" << transmitListMaxSize << " "
+            << "@ " << name() << " "
+        << std::endl;
+    }
 
     // add a very basic sanity check on the port to ensure the
     // invisible buffer is not growing beyond reasonable limits

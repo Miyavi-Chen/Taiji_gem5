@@ -84,6 +84,35 @@ MemCtrl::init()
 }
 
 void
+MemCtrl::resetAllStats()
+{
+    /** per-master average QoS priority */
+    for (int i = 0; i < avgPriority.size(); ++i ) {
+        avgPriority[i].reset();
+    }
+    /** per-master average QoS distance between assigned and queued values */
+    for (int i = 0; i < avgPriorityDistance.size(); ++i ) {
+        avgPriorityDistance.reset();
+    }
+    /** per-priority minimum latency */
+    for (int i = 0; i < priorityMinLatency.size(); ++i ) {
+        priorityMinLatency[i] = 0;
+    }
+    /** per-priority maximum latency */
+    for (int i = 0; i < priorityMaxLatency.size(); ++i ) {
+        priorityMaxLatency[i] = 0;
+    }
+    /** Count the number of turnarounds READ to WRITE */
+    numReadWriteTurnArounds = 0;
+    /** Count the number of turnarounds WRITE to READ */
+    numWriteReadTurnArounds = 0;
+    /** Count the number of times bus staying in READ state */
+    numStayReadState = 0;
+    /** Count the number of times bus staying in WRITE state */
+    numStayWriteState = 0;
+}
+
+void
 MemCtrl::logRequest(BusState dir, MasterID m_id, uint8_t qos,
                     Addr addr, uint64_t entries)
 {

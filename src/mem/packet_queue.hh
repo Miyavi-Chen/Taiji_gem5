@@ -64,6 +64,7 @@
  */
 class PacketQueue : public Drainable
 {
+  friend class HybridMem;
   private:
     /** A deferred packet, buffered to transmit later. */
     class DeferredPacket {
@@ -95,6 +96,8 @@ class PacketQueue : public Drainable
       * sanity check will be enabled by default.
       */
     bool _disableSanityCheck;
+    
+    size_t transmitListMaxSize;
 
     /**
      * if true, inserted packets have to be unconditionally scheduled

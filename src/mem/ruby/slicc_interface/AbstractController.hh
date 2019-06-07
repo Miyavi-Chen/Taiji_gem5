@@ -50,6 +50,7 @@
 #include "mem/mem_object.hh"
 #include "mem/packet.hh"
 #include "mem/protocol/AccessPermission.hh"
+#include "mem/hybrid_mem.hh"
 #include "mem/qport.hh"
 #include "mem/ruby/common/Address.hh"
 #include "mem/ruby/common/Consumer.hh"
@@ -62,6 +63,7 @@
 
 class Network;
 class GPUCoalescer;
+class HybridMem;
 
 // used to communicate that an in_port peeked the wrong message type
 class RejectException: public std::exception
@@ -72,6 +74,7 @@ class RejectException: public std::exception
 
 class AbstractController : public MemObject, public Consumer
 {
+  friend class HybridMem;
   public:
     typedef RubyControllerParams Params;
     AbstractController(const Params *p);
@@ -179,6 +182,8 @@ class AbstractController : public MemObject, public Consumer
 
     // MasterID used by some components of gem5.
     const MasterID m_masterId;
+    MasterID dmaDeviceId;
+    class SimObject *dmaDevicePtr;
 
     Network *m_net_ptr;
     bool m_is_blocking;
@@ -224,6 +229,7 @@ class AbstractController : public MemObject, public Consumer
      */
     class MemoryPort : public QueuedMasterPort
     {
+      friend class HybridMem;
       private:
         // Packet queues used to store outgoing requests and snoop responses.
         ReqPacketQueue reqQueue;

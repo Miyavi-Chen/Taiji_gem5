@@ -64,8 +64,10 @@ PIFPrefetcher::CompactorEntry::distanceFromTrigger(Addr target,
         unsigned int log_blk_size) const {
     const Addr target_blk = target >> log_blk_size;
     const Addr trigger_blk = trigger >> log_blk_size;
+    auto ret = (target_blk > trigger_blk)? (target_blk > trigger_blk):
+                (trigger_blk > target_blk);
 
-    return std::abs(target_blk - trigger_blk);
+    return ret;
 }
 
 bool

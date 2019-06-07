@@ -314,6 +314,9 @@ def create_mem_subsystem(options, system, intlv_size, disable_kvm_map):
     to_channel_addr = []
     mem_ctrls = []
     phys_data = []
+    
+    balance_interval = options.balance_interval
+    warmup_interval = options.time_warmup
 
     mem_space_size = convert.toMemorySize('0')
     assert(valid_size_of(channel_sizes) > 0)
@@ -355,7 +358,9 @@ def create_mem_subsystem(options, system, intlv_size, disable_kvm_map):
     if convert.toMemorySize(options.channel_intlv_size) == 0:
         hybrid_mem = HybridMem(phys_ranges = home_agent.phys_ranges, \
                                mem_ranges = home_agent.mem_ranges, \
-                               channel_ranges = channel_ranges)
+                               channel_ranges=channel_ranges, \
+                               time_interval=balance_interval, \
+                               time_warmup=warmup_interval)
         home_agent.master = hybrid_mem.slave
         hybrid_mem.master = channel_forwarder.slave
         system.hybrid_mem = hybrid_mem

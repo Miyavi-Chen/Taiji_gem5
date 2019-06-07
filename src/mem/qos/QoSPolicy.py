@@ -66,6 +66,7 @@ class QoSFixedPriorityPolicy(QoSPolicy):
         self._mpriorities.append([master, priority])
 
     def init(self):
+        self.setMasterPriority("system.hybrid_mem", 0)
         if not self._mpriorities:
             print("Error, use setMasterPriority to init masters/priorities\n");
             exit(1)
@@ -81,7 +82,7 @@ class QoSFixedPriorityPolicy(QoSPolicy):
                         master.getCCObject(), priority)
 
     # default fixed priority value for non-listed Masters
-    qos_fixed_prio_default_prio = Param.UInt8(0,
+    qos_fixed_prio_default_prio = Param.UInt8(1,
         "Default priority for non-listed Masters")
 
 class QoSPropFairPolicy(QoSPolicy):

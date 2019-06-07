@@ -120,6 +120,7 @@ def get_processes(options):
 
 parser = optparse.OptionParser()
 Options.addCommonOptions(parser)
+Options.addXBarOptions(parser)
 Options.addMemSubsystemOptions(parser)
 Options.addSEOptions(parser)
 

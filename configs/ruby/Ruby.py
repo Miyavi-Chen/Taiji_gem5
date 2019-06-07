@@ -59,7 +59,7 @@ def define_options(parser):
     parser.set_defaults(cpu_type="TimingSimpleCPU")
 
     parser.add_option("--ruby-clock", action="store", type="string",
-                      default='2GHz',
+                      default='5GHz',
                       help="Clock for blocks running at Ruby system's speed")
 
     parser.add_option("--access-backing-store", action="store_true", default=False,

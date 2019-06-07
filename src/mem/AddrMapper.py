@@ -135,5 +135,7 @@ class HybridMem(MemObject):
     granularity = Param.MemorySize('4kB', "Granular size for mapping")
     header_delay = Param.Cycles(1, "Header delay")
     width = Param.Unsigned(16, "Datapath width per port (bytes)")
-    max_migration_tasks = Param.Unsigned(8,
+    max_migration_tasks = Param.Unsigned(16,
         "Number of pages migrated at the same time")
+    time_interval = Param.Latency('10us', "Balance interval")
+    time_warmup = Param.Latency('10us', "Warm up interval")

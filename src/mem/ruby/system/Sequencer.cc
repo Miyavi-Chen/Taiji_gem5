@@ -64,6 +64,8 @@ Sequencer::Sequencer(const Params *p)
     m_inst_cache_hit_latency = p->icache_hit_latency;
     m_max_outstanding_requests = p->max_outstanding_requests;
     m_deadlock_threshold = p->deadlock_threshold;
+    rdReqMaxCycles = m_deadlock_threshold;
+    wrReqMaxCycles = m_deadlock_threshold;
 
     m_coreId = p->coreid; // for tracking the two CorePair sequencers
     assert(m_max_outstanding_requests > 0);
@@ -95,30 +97,32 @@ Sequencer::wakeup()
     RequestTable::iterator read_end = m_readRequestTable.end();
     for (; read != read_end; ++read) {
         SequencerRequest* request = read->second;
-        if (current_time - request->issue_time < m_deadlock_threshold)
-            continue;
-
-        panic("Possible Deadlock detected. Aborting!\n"
-              "version: %d request.paddr: 0x%x m_readRequestTable: %d "
-              "current time: %u issue_time: %d difference: %d\n", m_version,
-              request->pkt->getAddr(), m_readRequestTable.size(),
-              current_time * clockPeriod(), request->issue_time * clockPeriod(),
-              (current_time * clockPeriod()) - (request->issue_time * clockPeriod()));
+        auto req_cycles = current_time - request->issue_time;
+        if (rdReqMaxCycles < req_cycles) {
+            rdReqMaxCycles = req_cycles;
+            auto req_us =
+                (rdReqMaxCycles * clockPeriod()) / SimClock::Int::us;
+            std::cout
+                << "rdReqMax=" << req_us << "us" << " "
+                << "@ " << name() << " "
+            << std::endl;
+        }
     }
 
     RequestTable::iterator write = m_writeRequestTable.begin();
     RequestTable::iterator write_end = m_writeRequestTable.end();
     for (; write != write_end; ++write) {
         SequencerRequest* request = write->second;
-        if (current_time - request->issue_time < m_deadlock_threshold)
-            continue;
-
-        panic("Possible Deadlock detected. Aborting!\n"
-              "version: %d request.paddr: 0x%x m_writeRequestTable: %d "
-              "current time: %u issue_time: %d difference: %d\n", m_version,
-              request->pkt->getAddr(), m_writeRequestTable.size(),
-              current_time * clockPeriod(), request->issue_time * clockPeriod(),
-              (current_time * clockPeriod()) - (request->issue_time * clockPeriod()));
+        auto req_cycles = current_time - request->issue_time;
+        if (wrReqMaxCycles < req_cycles) {
+            wrReqMaxCycles = req_cycles;
+            auto req_us =
+                (wrReqMaxCycles * clockPeriod()) / SimClock::Int::us;
+            std::cout
+                << "wrReqMax=" << req_us << "us" << " "
+                << "@ " << name() << " "
+            << std::endl;
+        }
     }
 
     total_outstanding += m_writeRequestTable.size();

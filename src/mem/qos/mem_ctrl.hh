@@ -143,6 +143,11 @@ class MemCtrl: public AbstractMemory
 
     /** registers statistics */
     void regStats() override;
+    
+    /**
+     * Reset all stats
+     */
+    void resetAllStats();
 
     /**
      * Initializes dynamically counters and

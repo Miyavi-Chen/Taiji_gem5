@@ -38,6 +38,7 @@
 # Authors: Andreas Hansson
 
 import os
+import sys
 
 Import('main')
 
@@ -63,7 +64,110 @@ DRAMPowerFile('CAHelpers.cc')
 DRAMPowerFile('CmdHandlers.cc')
 DRAMPowerFile('MemBankWiseParams.cc')
 
-main.Library('drampower', [main.SharedObject(f) for f in drampower_files])
+dramenv = main.Clone()
+
+def identifyTarget(t):
+    ext = t.split('.')[-1]
+    if ext in target_types:
+        return ext
+    if obj2target.has_key(ext):
+        return obj2target[ext]
+    match = re.search(r'/tests/([^/]+)/', t)
+    if match and match.group(1) in target_types:
+        return match.group(1)
+    return 'all'
+
+# Start out with the compiler flags common to all compilers,
+# i.e. they all use -g for opt and -g -pg for prof
+ccflags = {'debug' : [], 'opt' : ['-g'], 'fast' : [], 'prof' : ['-g', '-pg'],
+           'perf' : ['-g']}
+
+# Start out with the linker flags common to all linkers, i.e. -pg for
+# prof, and -lprofiler for perf. The -lprofile flag is surrounded by
+# no-as-needed and as-needed as the binutils linker is too clever and
+# simply doesn't link to the library otherwise.
+ldflags = {'debug' : [], 'opt' : [], 'fast' : [], 'prof' : ['-pg'],
+           'perf' : ['-Wl,--no-as-needed', '-lprofiler', '-Wl,--as-needed']}
+
+# For Link Time Optimization, the optimisation flags used to compile
+# individual files are decoupled from those used at link time
+# (i.e. you can compile with -O3 and perform LTO with -O0), so we need
+# to also update the linker flags based on the target.
+if main['GCC']:
+    if sys.platform == 'sunos5':
+        ccflags['debug'] += ['-gstabs+']
+    else:
+        ccflags['debug'] += ['-ggdb3']
+    ldflags['debug'] += ['-O0']
+    # opt, fast, prof and perf all share the same cc flags, also add
+    # the optimization to the ldflags as LTO defers the optimization
+    # to link time
+    for target in ['opt', 'fast', 'prof', 'perf']:
+        ccflags[target] += ['-O3']
+        ldflags[target] += ['-O3']
+
+    ccflags['fast'] += main['LTO_CCFLAGS']
+    ldflags['fast'] += main['LTO_LDFLAGS']
+elif main['CLANG']:
+    ccflags['debug'] += ['-g', '-O0']
+    # opt, fast, prof and perf all share the same cc flags
+    for target in ['opt', 'fast', 'prof', 'perf']:
+        ccflags[target] += ['-O3']
+else:
+    print('Unknown compiler, please fix compiler options')
+    Exit(1)
+
+
+# To speed things up, we only instantiate the build environments we
+# need.  We try to identify the needed environment for each target; if
+# we can't, we fall back on instantiating all the environments just to
+# be safe.
+target_types = ['debug', 'opt', 'fast', 'prof', 'perf']
+obj2target = {'do': 'debug', 'o': 'opt', 'fo': 'fast', 'po': 'prof',
+              'gpo' : 'perf'}
+
+needed_envs = [identifyTarget(target) for target in BUILD_TARGETS]
+
+if len(needed_envs) != 1:
+    print('len(needed_envs) != 1')
+    Exit(1)
+
+elif 'debug' in needed_envs:
+    dramenv['OBJSUFFIX'] = '.do'
+    dramenv['SHOBJSUFFIX'] = '.dos'
+    dramenv.Append(CCFLAGS = Split(ccflags['debug']))
+    dramenv.Append(LINKFLAGS = Split(ldflags['debug']))
+
+elif 'opt' in needed_envs:
+    dramenv['OBJSUFFIX'] = '.o'
+    dramenv['SHOBJSUFFIX'] = '.os'
+    dramenv.Append(CCFLAGS = Split(ccflags['opt']))
+    dramenv.Append(LINKFLAGS = Split(ldflags['opt']))
+
+elif 'fast' in needed_envs:
+    dramenv['OBJSUFFIX'] = '.fo'
+    dramenv['SHOBJSUFFIX'] = '.fos'
+    dramenv.Append(CCFLAGS = Split(ccflags['fast']))
+    dramenv.Append(LINKFLAGS = Split(ldflags['fast']))
+
+elif 'prof' in needed_envs:
+    dramenv['OBJSUFFIX'] = '.po'
+    dramenv['SHOBJSUFFIX'] = '.pos'
+    dramenv.Append(CCFLAGS = Split(ccflags['prof']))
+    dramenv.Append(LINKFLAGS = Split(ldflags['prof']))
+
+elif 'perf' in needed_envs:
+    dramenv['OBJSUFFIX'] = '.gpo'
+    dramenv['SHOBJSUFFIX'] = '.gpos'
+    dramenv.Append(CCFLAGS = Split(ccflags['perf']))
+    dramenv.Append(LINKFLAGS = Split(ldflags['perf']))
+
+else:
+    print('Unknown type')
+    Exit(1)
+
+dramenv.Library('drampower', [dramenv.SharedObject(f) \
+for f in drampower_files])
 
 main.Append(LIBS=['drampower'])
 main.Prepend(LIBPATH=[Dir('.')])

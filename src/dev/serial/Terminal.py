@@ -35,6 +35,6 @@ from m5.objects.Serial import SerialDevice
 class Terminal(SerialDevice):
     type = 'Terminal'
     cxx_header = "dev/serial/terminal.hh"
-    port = Param.TcpPort(3456, "listen port")
+    port = Param.TcpPort(3459, "listen port")
     number = Param.Int(0, "terminal number")
     output = Param.Bool(True, "Enable output dump to file")

@@ -48,6 +48,7 @@ from m5.params import *
 from m5.proxy import *
 from m5.objects.AbstractMemory import *
 from m5.objects.QoSMemCtrl import *
+from m5.objects.QoSPolicy import *
 
 # Enum for memory scheduling algorithms, currently First-Come
 # First-Served and a First-Row Hit then First-Come First-Served
@@ -334,6 +335,10 @@ class DRAMCtrl(QoSMemCtrl):
 
     # Second voltage range defined by some DRAMs
     VDD2 = Param.Voltage("0V", "2nd Voltage Range")
+    
+    verbose = Param.Bool(True, "Print information")
+    deadlock_threshold = Param.Latency("1ms", "Deadlock threshold")
+    cal_interval = Param.Latency("100ms", "Calculation interval")
 
 # A single DDR3-1600 x64 channel (one command and address bus), with
 # timings based on a DDR3-1600 4 Gbit datasheet (Micron MT41J512M8) in
@@ -577,8 +582,10 @@ class DDR4_2400_16x4(DRAMCtrl):
 
     # override the default buffer sizes and go for something larger to
     # accommodate the larger bank count
-    write_buffer_size = 128
+    write_buffer_size = 64
     read_buffer_size = 64
+    
+    write_low_thresh_perc = 0
 
     # 1200 MHz
     tCK = '0.833ns'
@@ -679,6 +686,43 @@ class DDR4_2400_8x8(DDR4_2400_16x4):
     IDD4W = '123mA'
     IDD4R = '135mA'
     IDD3P1 = '37mA'
+    
+class DDR4_2400_8G_8x8(DDR4_2400_16x4):
+    # Number of priorities in the system
+    qos_priorities = 2
+    # QoS scheduler policy: tags request with QoS priority value
+    qos_policy = QoSFixedPriorityPolicy()
+    
+     # size of device
+    device_size = '1GB'
+    
+    ranks_per_channel = 1
+    # 8x8 configuration, 8 devices each with an 8-bit interface
+    device_bus_width = 8
+
+    # Each device has a page (row buffer) size of 1 Kbyte (1K columns x8)
+    device_rowbuffer_size = '1kB'
+
+    # 8x8 configuration, so 8 devices
+    devices_per_rank = 8
+
+    # RRD_L (same bank group) for 1K page is MAX(4 CK, 4.9ns)
+    tRRD_L = '4.9ns'
+
+    tXAW = '21ns'
+    
+    tRFC = '350ns'
+
+    # Current values from datasheet
+    IDD0 = '48mA'
+    IDD3N = '43mA'
+    IDD4W = '123mA'
+    IDD4R = '135mA'
+    IDD3P1 = '37mA'
+    
+    write_low_thresh_perc = 0
+    # page_policy = 'close'
+    max_accesses_per_row = 16
 
 # A single DDR4-2400 x64 channel (one command and address bus), with
 # timings based on a DDR4-2400 8 Gbit datasheet (Micron MT40A512M16)
@@ -686,6 +730,11 @@ class DDR4_2400_8x8(DDR4_2400_16x4):
 # Total channel capacity is 4GB
 # 4 devices/rank * 1 ranks/channel * 1GB/device = 4GB/channel
 class DDR4_2400_4x16(DDR4_2400_16x4):
+    # Number of priorities in the system
+    qos_priorities = 2
+    # QoS scheduler policy: tags request with QoS priority value
+    qos_policy = QoSFixedPriorityPolicy()
+    # qos_policy.setMasterPriority("hybrid_mem", 1)
     # 4x16 configuration, 4 devices each with an 16-bit interface
     device_bus_width = 16
 
@@ -714,6 +763,8 @@ class DDR4_2400_4x16(DDR4_2400_16x4):
     tRRD_L = '6.4ns';
 
     tXAW = '30ns'
+    
+    tRFC = '350ns'
 
     # Current values from datasheet
     IDD0 = '80mA'
@@ -1234,6 +1285,9 @@ class PCM_LPDDR2_400_8x8(DRAMCtrl):
     ranks_per_channel = 1
 
     banks_per_rank = 2
+    
+    write_buffer_size = 128
+    read_buffer_size = 64
 
     # No DLL for LPDDR2
     dll = False
@@ -1312,3 +1366,85 @@ class PCM_LPDDR2_400_8x8(DRAMCtrl):
     IDD5 = '0mA'
 
     VDD = '1.8V'
+
+class PCM_LPDDR2_4G_400_16x4(PCM_LPDDR2_400_8x8):
+    # size of device
+    device_size = '512MB'
+
+    # 16x4 configuration, 1 device with a 4-bit interface
+    device_bus_width = 8
+    burst_length = 8
+    # Each device has a page (row buffer) size of 1KB
+    device_rowbuffer_size = '1kB'
+    # 16x4 configuration, so 16 device
+    devices_per_rank = 8
+    ranks_per_channel = 1
+
+    banks_per_rank = 8
+    
+    write_buffer_size = 128
+    read_buffer_size = 64
+    write_low_thresh_perc = 0
+
+# 2009DAC_PDRAM: A hybrid PRAM and DRAM main memory system
+class PCM_LPDDR2_8G_400_16x4(PCM_LPDDR2_400_8x8):
+    # Number of priorities in the system
+    qos_priorities = 2
+    # QoS scheduler policy: tags request with QoS priority value
+    qos_policy = QoSFixedPriorityPolicy()
+    # qos_policy.setMasterPriority("hybrid_mem", 1)
+
+
+    
+    # size of device
+    device_size = '1024MB'
+    
+    tRCD = '28ns'
+    tWP = '150ns'
+    tCL = '15ns'
+
+    # 16x4 configuration, 1 device with a 4-bit interface
+    device_bus_width = 8
+    burst_length = 8
+    # Each device has a page (row buffer) size of 1KB
+    device_rowbuffer_size = '1kB'
+    # 16x4 configuration, so 16 device
+    devices_per_rank = 8
+    ranks_per_channel = 1
+
+    banks_per_rank = 16
+    
+    write_buffer_size = 64
+    read_buffer_size = 64
+    write_low_thresh_perc = 0
+    # page_policy='close'
+    max_accesses_per_row = 2
+    
+    IDD0 = '38.88mA'
+    IDD4R = '68.33mA'
+    IDD4W = '443.33mA'
+    IDD3N = '25mA'
+    
+class PCM_DDR2_16G_400_16x4(PCM_LPDDR2_8G_400_16x4):
+    ranks_per_channel = 2
+    
+class PCM_DDR2_32G_400_16x4(PCM_LPDDR2_8G_400_16x4):
+    ranks_per_channel = 2
+class PCM_LPDDR2_32G_400_16x4(PCM_LPDDR2_400_8x8):
+    # size of device
+    device_size = '1024MB'
+
+    # 16x4 configuration, 1 device with a 4-bit interface
+    device_bus_width = 4
+    burst_length = 8
+    # Each device has a page (row buffer) size of 1KB
+    device_rowbuffer_size = '1kB'
+    # 16x4 configuration, so 16 device
+    devices_per_rank = 16
+    ranks_per_channel = 2
+
+    banks_per_rank = 16
+    
+    write_buffer_size = 128
+    read_buffer_size = 64
+    write_low_thresh_perc = 0

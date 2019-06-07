@@ -121,7 +121,7 @@ PortForwarder::recvTimingReq(PacketPtr pkt, PortID slave_port_id)
     // since it is a normal request, attempt to send the packet
     bool success = masterPorts[master_port_id]->sendTimingReq(pkt);
 
-    if (!success)  {
+    if (!success) {
         DPRINTF(PortForwarder, "recvTimingReq: src %s %s 0x%x RETRY\n",
                 src_port->name(), pkt->cmdString(), pkt->getAddr());
         reqLayers[master_port_id]->failedTiming(src_port, curTick());

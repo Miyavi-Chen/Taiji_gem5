@@ -176,6 +176,9 @@ class Sequencer : public RubyPort
     int m_max_outstanding_requests;
     Cycles m_deadlock_threshold;
 
+    Cycles rdReqMaxCycles;
+    Cycles wrReqMaxCycles;
+
     CacheMemory* m_dataCache_ptr;
     CacheMemory* m_instCache_ptr;
 

@@ -77,7 +77,7 @@ def addNoISAOptions(parser):
                       help = """Top-level voltage for blocks running at system
                       power supply""")
     parser.add_option("--sys-clock", action="store", type="string",
-                      default='1GHz',
+                      default='5GHz',
                       help = """Top-level clock for blocks running at system
                       speed""")
 
@@ -109,10 +109,10 @@ def addNoISAOptions(parser):
     parser.add_option("--num-dirs", type="int", default=1)
     parser.add_option("--num-l2caches", type="int", default=1)
     parser.add_option("--num-l3caches", type="int", default=1)
-    parser.add_option("--l1d_size", type="string", default="64kB")
+    parser.add_option("--l1d_size", type="string", default="32kB")
     parser.add_option("--l1i_size", type="string", default="32kB")
-    parser.add_option("--l2_size", type="string", default="2MB")
-    parser.add_option("--l3_size", type="string", default="16MB")
+    parser.add_option("--l2_size", type="string", default="1MB")
+    parser.add_option("--l3_size", type="string", default="8MB")
     parser.add_option("--l1d_assoc", type="int", default=2)
     parser.add_option("--l1i_assoc", type="int", default=2)
     parser.add_option("--l2_assoc", type="int", default=8)
@@ -142,6 +142,12 @@ def addNoISAOptions(parser):
              "Direct parameters of the root object are not accessible, "
              "only parameters of its children.")
 
+def addXBarOptions(parser):
+    parser.add_option("--balance-interval", action="store",
+                        type="string", default="50us")
+    parser.add_option("--time-warmup", action="store",
+                        type="string", default="0us")
+
 def addMemSubsystemOptions(parser):
     # memory subsystem options
     parser.add_option("--channel-intlv-size", type="string", action="store",
@@ -149,12 +155,12 @@ def addMemSubsystemOptions(parser):
                       help="Interleaved size between channels, enabled by "
                       "--mem-type=MemSubsystem, set to 0 to disable ")
     parser.add_option("--channel-sizes", type="string", action="store",
-                      default="3GB;13GB",
+                      default="16GB;4GB",
                       help="The sizes of the memory controller in the memory "
                       "subsystem, enabled by --mem-type=MemSubsystem, "
                       "separated by ';' ")
     parser.add_option("--channel-types", type="string", action="store",
-                      default="DDR4_2400_8x8;DDR4_2400_8x8",
+                      default="PCM_LPDDR2_400_8x8;DDR4_2400_4x16",
                       help="The types of the memory controller in the memory "
                       "subsystem, enabled by --mem-type=MemSubsystem, "
                       "separated by ';' ")

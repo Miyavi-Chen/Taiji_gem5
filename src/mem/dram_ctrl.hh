@@ -55,6 +55,8 @@
 #define __MEM_DRAM_CTRL_HH__
 
 #include <deque>
+#include <fstream>
+#include <iostream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -96,11 +98,14 @@
  * similar to that described in "Optimized Active and Power-Down Mode
  * Refresh Control in 3D-DRAMs" by Jung et al, VLSI-SoC, 2014.
  */
+class HybridMem;
+
 class DRAMCtrl : public QoS::MemCtrl
 {
-
+  friend class HybridMem;
   private:
-
+  
+    HybridMem * HybridMemptr;
     // For now, make use of a queued slave port to avoid dealing with
     // flow control for the responses being sent back
     class MemoryPort : public QueuedSlavePort
@@ -141,6 +146,8 @@ class DRAMCtrl : public QoS::MemCtrl
      */
     bool retryRdReq;
     bool retryWrReq;
+    Tick rdReqWaitingTick;
+    Tick wrReqWaitingTick;
 
     /**/
 
@@ -194,11 +201,17 @@ class DRAMCtrl : public QoS::MemCtrl
         uint32_t bytesAccessed;
 
         RowState rowState;
+        
+        Tick Total_Tick_between_diff_rows;
+        uint32_t count_of_switch_rows;
+        Tick pre_switch_tick;
 
         Bank() :
             openRow(NO_ROW), bank(0), bankgr(0),
             rdAllowedAt(0), wrAllowedAt(0), preAllowedAt(0), actAllowedAt(0),
-            rowAccesses(0), bytesAccessed(0), rowState(RowState::ROW_INVALID)
+            rowAccesses(0), bytesAccessed(0), rowState(RowState::ROW_INVALID),
+            Total_Tick_between_diff_rows(0),
+            count_of_switch_rows(0), pre_switch_tick(0)
         { }
     };
 
@@ -364,11 +377,6 @@ class DRAMCtrl : public QoS::MemCtrl
          * Track time spent in each power state.
          */
         Stats::Vector pwrStateTime;
-
-        /**
-         * Function to update Power Stats
-         */
-        void updatePowerStats();
 
         /**
          * Schedule a power state transition in the future, and
@@ -539,6 +547,11 @@ class DRAMCtrl : public QoS::MemCtrl
          * Reset stats on a stats event
          */
         void resetStats();
+        
+        /**
+         * Function to update Power Stats
+         */
+        void updatePowerStats();
 
         /**
          * Schedule a transition to power-down (sleep)
@@ -655,6 +668,11 @@ class DRAMCtrl : public QoS::MemCtrl
 
         /** MasterID associated with the packet */
         const MasterID _masterId;
+        
+        const uint64_t QLen;
+
+        const bool physAddrValid;
+        const Addr physAddr;
 
         const bool read;
 
@@ -739,12 +757,18 @@ class DRAMCtrl : public QoS::MemCtrl
          */
         inline bool isWrite() const { return !read; }
 
+        bool physAddrIsValid() const { return physAddrValid; }
+
+        Addr getPhysAddr() const { return physAddr; }
+
 
         DRAMPacket(PacketPtr _pkt, bool is_read, uint8_t _rank, uint8_t _bank,
                    uint32_t _row, uint16_t bank_id, Addr _addr,
-                   unsigned int _size, Bank& bank_ref, Rank& rank_ref)
+                   unsigned int _size, Bank& bank_ref, Rank& rank_ref, int64_t qlen)
             : entryTime(curTick()), readyTime(curTick()), pkt(_pkt),
-              _masterId(pkt->masterId()),
+              _masterId(pkt->masterId()), QLen(qlen),
+              physAddrValid(pkt->physAddrIsValid()),
+              physAddr((physAddrValid) ? (_pkt->getPhysAddr()) : (0)),
               read(is_read), rank(_rank), bank(_bank), row(_row),
               bankId(bank_id), addr(_addr), size(_size), burstHelper(NULL),
               bankRef(bank_ref), rankRef(rank_ref), _qosValue(_pkt->qosValue())
@@ -1064,14 +1088,18 @@ class DRAMCtrl : public QoS::MemCtrl
 
     // All statistics that the model needs to capture
     Stats::Scalar readReqs;
+    Stats::Scalar readReqsDMA;
     Stats::Scalar writeReqs;
+    Stats::Scalar writeReqsDMA;
     Stats::Scalar readBursts;
     Stats::Scalar writeBursts;
     Stats::Scalar bytesReadDRAM;
     Stats::Scalar bytesReadWrQ;
     Stats::Scalar bytesWritten;
     Stats::Scalar bytesReadSys;
+    Stats::Scalar bytesReadSysDMA;
     Stats::Scalar bytesWrittenSys;
+    Stats::Scalar bytesWrittenSysDMA;
     Stats::Scalar servicedByWrQ;
     Stats::Scalar mergedWrBursts;
     Stats::Scalar neitherReadNorWrite;
@@ -1084,9 +1112,20 @@ class DRAMCtrl : public QoS::MemCtrl
     Stats::Vector writePktSize;
     Stats::Vector rdQLenPdf;
     Stats::Vector wrQLenPdf;
+    Stats::Vector rdQLenTimes;
+    Stats::Vector wrQLenTimes;
+    Stats::Vector rdQLenTicks;
+    Stats::Vector wrQLenTicks;
     Stats::Histogram bytesPerActivate;
     Stats::Histogram rdPerTurnAround;
     Stats::Histogram wrPerTurnAround;
+    //miyavi
+    Stats::Scalar servicedByWrQPI;
+    Stats::Scalar readBurstsPI;
+    Stats::Scalar writeBurstsPI;
+    Stats::Scalar bytesReadDRAMPI;
+    Stats::Scalar bytesWrittenPI;
+    
 
     // per-master bytes read and written to memory
     Stats::Vector masterReadBytes;
@@ -1112,11 +1151,21 @@ class DRAMCtrl : public QoS::MemCtrl
     Stats::Scalar totQLat;
     Stats::Scalar totMemAccLat;
     Stats::Scalar totBusLat;
+    //miyavi
+    Stats::Scalar totQLatPI;
+    Stats::Scalar totMemAccLatPI;
+    Stats::Scalar totMemAccLatMigration;
 
     // Average latencies per request
     Stats::Formula avgQLat;
     Stats::Formula avgBusLat;
     Stats::Formula avgMemAccLat;
+    //miyavi
+    Stats::Formula avgQLatPI;
+    Stats::Formula avgMemAccLatPI;
+    //miyavi
+    Stats::Average avgRdQLenPI;
+    Stats::Average avgWrQLenPI;
 
     // Average bandwidth
     Stats::Formula avgRdBW;
@@ -1127,6 +1176,9 @@ class DRAMCtrl : public QoS::MemCtrl
     Stats::Formula busUtil;
     Stats::Formula busUtilRead;
     Stats::Formula busUtilWrite;
+    //miyavi
+    Stats::Formula avgRdBWPI;
+    Stats::Formula avgWrBWPI;
 
     // Average queue lengths
     Stats::Average avgRdQLen;
@@ -1150,6 +1202,44 @@ class DRAMCtrl : public QoS::MemCtrl
 
     /** The time when stats were last reset used to calculate average power */
     Tick lastStatsResetTick;
+    
+    MasterID HybridMemID;
+    MasterID DMAID;
+    
+    uint64_t lastRdQLen;
+    uint64_t lastWrQLen;
+    Tick lastRdQLenTick;
+    Tick lastWrQLenTick;
+    double timeInterval;
+
+    bool verbose;
+
+    const Tick deadlockThreshold;
+
+    const Tick calInterval;
+
+    Tick rdReqWaitingTicks;
+
+    size_t rdReqWaitingTimes;
+
+    Tick wrReqWaitingTicks;
+
+    size_t wrReqWaitingTimes;
+
+    EventFunctionWrapper rdReqDeadlockEvent;
+
+    EventFunctionWrapper wrReqDeadlockEvent;
+
+    EventFunctionWrapper calculateWaitingEvent;
+
+    void rdReqDeadlock();
+
+    void wrReqDeadlock();
+
+    void calculateWaiting();
+
+    void resetWaitingCounter();
+    
 
     /**
      * Upstream caches need this packet until true is returned, so
@@ -1204,6 +1294,14 @@ class DRAMCtrl : public QoS::MemCtrl
      *
      */
     bool allRanksDrained() const;
+    /**
+     * Reset all stats
+     */
+    void resetAllStats();
+    void resetPerInterval();
+    
+    Tick avgTimeSwitchRow();
+    
 
   protected:
 

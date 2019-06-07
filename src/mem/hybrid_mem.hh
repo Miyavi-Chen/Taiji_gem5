@@ -43,8 +43,12 @@
 #include <deque>
 #include <vector>
 #include <map>
+#include <iostream>
+#include <utility> 
 
+#include "mem/dram_ctrl.hh"
 #include "mem/mem_object.hh"
+#include "base/statistics.hh"
 #include "params/HybridMem.hh"
 
 /**
@@ -55,10 +59,10 @@
  * the master port (i.e. the memory side) to the slave port are
  * currently not modified.
  */
-
+class DRAMCtrl;
 class HybridMem : public MemObject
 {
-
+  friend class DRAMCtrl;
   public:
 
     enum WaitState {
@@ -89,7 +93,23 @@ class HybridMem : public MemObject
 
     HybridMem(const HybridMemParams* params);
 
-    virtual void init();
+    virtual void init() override;
+    
+    virtual void startup() override;
+    
+    virtual void regStats() override;
+    
+    void resetStats();
+    
+    class HybridmemResetCallback : public Callback
+    {
+      private:
+        HybridMem *hybridmem;
+
+      public:
+        HybridmemResetCallback(HybridMem *m) : hybridmem(m) {}
+        virtual void process() { hybridmem->resetStats(); };
+    };
 
     /** A function used to return the port associated with this object. */
     Port &getPort(const std::string &if_name,
@@ -151,7 +171,8 @@ class HybridMem : public MemObject
         FramePool(AddrRange _range, Addr _frameSize)
           : RANGE(_range), FRAME_SIZE(_frameSize),
             frames(RANGE.size() / FRAME_SIZE),
-            poolEmpty(false), nextTimeFrameIdx(0)
+            poolEmpty(false), poolUsed(false), nextTimeFrameIdx(0),
+            freeFrameSize(frames.size())
         { }
 
         bool tryGetAnyFreeFrame(struct FrameAddr *_frame)
@@ -176,8 +197,9 @@ class HybridMem : public MemObject
           size_t i = (_frame.val - RANGE.start()) / FRAME_SIZE;
           assert(i < frames.size());
           frames[i].assignOwner(_owner);
+          --freeFrameSize;
+          // assert(freeFrameSize >=0);
         }
-
         void freeFrame(struct PageAddr _assigned, struct FrameAddr _frame)
         {
           assert(RANGE.contains(_frame.val));
@@ -185,6 +207,7 @@ class HybridMem : public MemObject
           assert(i < frames.size());
           frames[i].eraseOwner(_assigned);
           poolEmpty = false;
+          ++freeFrameSize;
         }
 
         struct PageAddr getOwner(struct FrameAddr _frame)
@@ -194,6 +217,21 @@ class HybridMem : public MemObject
           assert(i < frames.size());
           return frames[i].getOwner();
         }
+        
+        void setPoolUsed()
+        {
+          assert(poolUsed == false);
+          poolUsed = true;
+        }
+        
+        bool isPoolUsed()
+        {
+          return poolUsed;
+        }
+        
+        size_t getFreeFrameSize() {
+          return freeFrameSize;
+        }
 
       private:
 
@@ -201,7 +239,9 @@ class HybridMem : public MemObject
         const Addr FRAME_SIZE;
         std::vector<class FrameInfo> frames;
         bool poolEmpty;
+        bool poolUsed;
         size_t nextTimeFrameIdx;
+        size_t freeFrameSize;
 
     };
 
@@ -331,7 +371,42 @@ class HybridMem : public MemObject
             masterWaitingTick(std::numeric_limits<Tick>::max())
         {
           pageAddr.val = std::numeric_limits<Addr>::max();
+          
+          readcount = writecount = migrationCount = 0;
+          isDirty = isInDram = isPageCache = false;
+          migrationIntervalTotal = lastMigrationInterval = 0;
+          RWScoresPerInterval = writeCountPerInterval = dirty_num = 0;
+          predictRowHit = predictRowMiss = lastAccessTick = 0;
+          readreqPerInterval = writereqPerInterval = 0;
+          lastAccessInterval = 0;
         }
+        
+        int readcount;
+        int writecount;
+        bool isDirty;
+        bool isInDram;
+        bool isPageCache;
+        
+        //observation
+        int migrationCount;
+        int migrationIntervalTotal;
+        int lastMigrationInterval;
+
+        //score include read and write
+        size_t RWScoresPerInterval;
+        //only write
+        size_t writeCountPerInterval;
+        size_t dirty_num;
+
+        std::vector<Tick> access_tick;
+        size_t predictRowHit;
+        size_t predictRowMiss;
+        Tick lastAccessTick;
+
+        size_t readreqPerInterval;
+        size_t writereqPerInterval;
+        
+        uint64_t lastAccessInterval;
 
         void setPageAddr(struct PageAddr _addr) {
           assert(pageAddr.val == std::numeric_limits<Addr>::max());
@@ -407,6 +482,12 @@ class HybridMem : public MemObject
             getValidChannelIdx(_idxSet);
           }
         }
+        
+        void getCanLaunchChannelIdxFun(std::vector<struct ChannelIdx> *_idxSet)
+        {
+          _idxSet->clear();
+            getValidChannelIdx(_idxSet);
+        }
 
         void startMigration() {
           assert(!migrating);
@@ -480,6 +561,33 @@ class HybridMem : public MemObject
           assert(_idx.val < channels.size());
           return channels[_idx.val].getPossession();
         }
+        
+        void resetPageCounters()
+        {
+          if (isPageCache) {readcount = -64; writecount = -64;}
+          else {readcount = 0; writecount = 0;}
+          //observation
+          migrationCount = 0;
+          migrationIntervalTotal = 0;
+          lastMigrationInterval = 0;
+
+          //score include read and write
+          RWScoresPerInterval = 0;
+          //only write
+          writeCountPerInterval = 0;
+          dirty_num = 0;
+
+          predictRowHit = 0;
+          predictRowMiss = 0;
+
+          readreqPerInterval = 0;
+          writereqPerInterval = 0;
+          
+          lastAccessTick = 0;
+
+          readreqPerInterval = 0;
+          writereqPerInterval = 0;
+        }
 
       private:
 
@@ -516,6 +624,13 @@ class HybridMem : public MemObject
           assert(i < pages.size());
           return &(pages[i]);
         }
+        
+        void resetPageCounters()
+        {
+          for (size_t i = 0; i < pages.size(); ++i) {
+            pages[i].resetPageCounters();
+          }
+        }
 
       private:
 
@@ -548,6 +663,13 @@ class HybridMem : public MemObject
             }
           }
           assert(0);
+        }
+        
+        void resetPageCounters()
+        {
+          for (size_t i = 0; i < ranges.size(); ++i) {
+            ranges[i].resetPageCounters();
+          }
         }
 
       private:
@@ -842,6 +964,297 @@ class HybridMem : public MemObject
      * remapped to. See the description for memRanges above
      */
     std::vector<AddrRange> channelRanges;
+    
+    class LRU
+    {
+      public:
+
+        LRU(int);
+
+        std::map<Addr, int> map_index;
+        int head;
+        int tail;
+        int size;
+        int max_size;
+
+        struct node {
+            Addr hostAddr;
+            int next;
+            int pre;
+        };
+        node *member;
+        bool *exist;
+
+        virtual struct PageAddr put(Addr);
+        virtual struct PageAddr firstPut(Addr);
+        struct PageAddr findInLRU(int);
+        // struct PageAddr notFindInLRU(int);
+
+        void getAllHostPages(std::vector<Addr>&);
+
+        void reset();
+        
+        bool isEmpty();
+
+    };
+    
+    class LFU
+    {
+      public:
+
+        LFU(int cacheMaxSize)
+        : maxSize(cacheMaxSize), size(0), head(-1), tail(-1)
+        {
+          lfuNodes = new node[maxSize];
+          for (int i = 0 ; i < maxSize ; i++) {
+            lfuNodes[i].hostAddr = std::numeric_limits<Addr>::max();
+            lfuNodes[i].DValue = 0;
+            lfuNodes[i].next = -1;
+            lfuNodes[i].pre = -1;
+          }
+        }
+        
+        struct node {
+            Addr hostAddr;
+            int DValue;
+            int next;
+            int pre;
+        };
+
+        void order(int idx) {
+          int cur = tail;
+          
+          if (head == -1 && tail == -1) {
+            head = tail = idx;
+            checkLFUErr();
+            return;
+          }
+          
+          while (cur != -1) {
+            if (lfuNodes[cur].DValue > lfuNodes[idx].DValue) {
+              lfuNodes[idx].pre = cur;
+              lfuNodes[idx].next = lfuNodes[cur].next;
+              if (cur == tail) {
+                tail = idx;
+              } else {
+                lfuNodes[lfuNodes[cur].next].pre = idx;
+              }
+              lfuNodes[cur].next = idx;            
+              checkLFUErr();
+              return;
+              
+            } else {
+              cur = lfuNodes[cur].pre;
+            }
+          }
+          
+          if (cur == -1) {
+            lfuNodes[head].pre = idx;
+            lfuNodes[idx].next = head;
+            lfuNodes[idx].pre = -1;
+            head = idx;
+          }
+          checkLFUErr();
+        }
+          
+        void increment(int i, int Dvalue) 
+        { 
+          lfuNodes[i].DValue += Dvalue;
+          assert(Dvalue > 0);
+          if (size == 1 || i == head) {
+            checkLFUErr();   
+            return;
+          } else if (i == tail) {
+            int pre = lfuNodes[i].pre;
+            lfuNodes[pre].next = -1;
+            tail = pre;
+            lfuNodes[i].pre = lfuNodes[i].next = -1;
+            order(i);
+          } else {
+            int pre = lfuNodes[i].pre;
+            int next = lfuNodes[i].next;
+            lfuNodes[pre].next = next;
+            lfuNodes[next].pre = pre;
+            lfuNodes[i].pre = lfuNodes[i].next = -1;
+            order(i);
+          }
+          
+        } 
+          
+        struct PageAddr insert(Addr addr, int Dvalue) 
+        {
+          struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
+          if (size == maxSize) {
+            evictPage.val = lfuNodes[tail].hostAddr;
+            // std::cout << lfuNodes[tail].hostAddr <<"/"<< lfuNodes[tail].DValue << " removed.\n";
+            
+            int tmpIdx = tail;
+            int pre = lfuNodes[tmpIdx].pre;
+            lfuNodes[pre].next = -1;
+            lfuNodes[tmpIdx].pre = -1;
+            lfuNodes[tmpIdx].next = -1;
+            tail = pre;
+            
+            int n = mapIndex.erase(lfuNodes[tmpIdx].hostAddr);
+            if (n != 1) {
+                printf("LFU error!1\n");
+                exit(-1);
+            }
+            lfuNodes[tmpIdx].hostAddr = addr;
+            lfuNodes[tmpIdx].DValue = Dvalue;
+            mapIndex.insert(std::make_pair(addr, tmpIdx));
+            order(tmpIdx);
+            return evictPage;
+             
+          }
+          ++size;
+          for (int i = 0; i < maxSize; i++) {
+            if(lfuNodes[i].hostAddr == std::numeric_limits<Addr>::max()) {
+              lfuNodes[i].hostAddr = addr;
+              lfuNodes[i].DValue = Dvalue;
+              lfuNodes[i].pre = lfuNodes[i].next = -1;
+              mapIndex.insert(std::make_pair(addr, i));
+              order(i);
+              break;
+            }
+          }
+ 
+          // std::cout << "cache block " << addr << " inserted.\n";
+          return evictPage; 
+        } 
+          
+        virtual struct PageAddr refer(Addr addr, int Dvalue) 
+        {
+          struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
+          if (mapIndex.find(addr) == mapIndex.end()) 
+            evictPage = insert(addr, Dvalue);
+          else
+            increment(mapIndex[addr], Dvalue);
+          
+          return evictPage;
+        }
+            
+        virtual void reset()
+        {
+          head = -1;
+          tail = -1;
+          size = 0;
+          mapIndex.clear();
+          for (int i = 0; i < maxSize; ++i) {
+            lfuNodes[i].hostAddr = std::numeric_limits<Addr>::max();
+            lfuNodes[i].DValue = 0;
+            lfuNodes[i].next = -1;
+            lfuNodes[i].pre = -1;
+          }
+        }
+        void checkLFUErr()
+        {
+          std::unordered_set<Addr> lfuList;
+          for (int i = 0, cur = head; i < size; ++i, cur = lfuNodes[cur].next) {
+            lfuList.insert(lfuNodes[cur].hostAddr);
+          }
+          assert(lfuList.size() == capacity());
+        }
+        bool isEmpty() {return size == 0;}
+        int capacity() {return size;}
+        void printLFU() 
+        {
+          for (int i = 0, cur = head; i < size; ++i, cur = lfuNodes[cur].next) {
+            std::cout<<lfuNodes[cur].DValue<<", ";
+          }
+          std::cout<<"\n";
+        }
+        
+      public:
+        std::map<Addr, int> mapIndex;
+        const int maxSize;
+        int size;
+        int head;
+        int tail;
+        node *lfuNodes;
+
+    };
+    
+    class LFUDA : public LFU
+    {
+      public:
+        LFUDA(int _cacheMaxSize, int _threshold, int _maxHits)
+        : LFU(_cacheMaxSize), threshold(_threshold), maxHits(_maxHits)
+        {
+          
+        }
+        
+        struct PageAddr refer(Addr addr, int Dvalue) override
+        {
+          struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
+          if (mapIndex.find(addr) == mapIndex.end()) {
+            ++threshold;
+            if (size == maxSize) {
+              if (lfuNodes[tail].DValue > threshold) {
+                return evictPage;
+              } else {
+                evictPage = insert(addr, threshold);
+              }
+            } else {
+              evictPage = insert(addr, threshold);
+            }
+          } else {
+            increment(mapIndex[addr], Dvalue);
+            if (lfuNodes[mapIndex[addr]].DValue >= maxHits) {
+              // std::cout<<"Reach Max Hits\n";
+              for (auto & iter : mapIndex) {
+                lfuNodes[iter.second].DValue = 
+                  lfuNodes[iter.second].DValue - maxHits < 0 ?
+                  0 : lfuNodes[iter.second].DValue - maxHits;
+                
+              }
+              
+              threshold = 0;
+            }
+          }
+            
+          return evictPage;
+        }
+        
+        virtual void reset() override
+        {
+          LFU::reset();
+          threshold = 0;
+        }
+      
+      private:
+        int threshold;
+        const int maxHits;
+    };
+    
+    LFUDA DramLFUDA;
+    LFUDA PcmLFUDA;
+    // LFU DramLFU;
+    // LFU PcmLFU;
+    
+    std::unordered_set<Addr> mapRef;
+    LRU rankingDramLRU;
+    LRU rankingPcmLRU;
+    
+    class SortHostPage
+    {
+      public:
+        Addr host_PN;
+        Addr dram_PN;
+        int value;
+        int writecount;
+        bool isDirty;
+
+    };
+    std::vector<SortHostPage> Ranking;
+
+    class SortMigration
+    {
+      public:
+        double avg_migration_interval;
+        int host_PN;
+        int migration_count;
+    };
 
     const bool verbose;
 
@@ -876,6 +1289,9 @@ class HybridMem : public MemObject
     std::deque<class MigrationTask *> migrationTasks;
 
     std::map<RequestPtr, class MigrationTask *> migrationReq;
+    
+    std::map<Addr, int> migrationPages;
+    std::map<Addr, int> migrationPagesPI;
 
     void recvFunctional(PacketPtr pkt);
 
@@ -925,6 +1341,8 @@ class HybridMem : public MemObject
     Addr toChannelAddr(class Page *page, struct ChannelIdx idx, PacketPtr pkt);
 
     struct ChannelIdx selectChannelIdx(class Page *page);
+    
+    struct ChannelIdx selectChannelIdxFun(class Page *page);
 
     struct ChannelIdx toChannelIdx(size_t i) const;
 
@@ -933,11 +1351,16 @@ class HybridMem : public MemObject
     struct PhysAddr toPhysAddr(class Page *page) const;
 
     struct PageAddr toPageAddr(Addr addr) const;
+    
+    struct PageAddr toMemAddr(Addr addr) const;
 
     struct PageAddr toPageAddr(PacketPtr pkt) const;
+    
+    struct FrameAddr toFrameAddrMemSide(Addr addr) const;
+    
+    struct PageAddr toPageAddrMemSide(Addr addr) const;
 
     struct FrameAddr toFrameAddr(Addr addr) const;
-
     struct FrameAddr toFrameAddr(PacketPtr pkt) const;
 
     bool isAscending(const std::vector<AddrRange> &ranges) const;
@@ -947,6 +1370,102 @@ class HybridMem : public MemObject
     bool canBeDrained();
 
     DrainState drain() override;
-};
+    
+    void CountScoreinc(struct PageAddr, bool isRead, bool hit, uint64_t qlen);
+    
+    void ReadCountinc(class Page *page, uint64_t qlen);
+    
+    void WriteCountinc(class Page *page, uint64_t qlen);
+    
+    size_t addScoreToPage(class Page *page, size_t score);
+    
+    void getPageRanking(std::vector<Addr>& v);
+    
+    static bool PCMtoDRAMsort(const SortHostPage& a, const SortHostPage& b);
+    static bool DRAMtoPCMsort(const SortHostPage& a, const SortHostPage& b);
+    
+    void getMigrationPageNum(size_t& , double DRAM_latency, double PCM_latency);
+    void genMigrationTasks(size_t &migrationPageNum, bool pcm2dram);
+    void genDramEvictedMigrationTasks(size_t &halfMigrationPageNum);
+    void genPcmMigrationTasks(size_t &migrationPageNum);
+    void genDramMigrationTasks(size_t &migrationPageNum);
+    
+    void predicRowHitOrMiss(class Page * page);
+    
+    void updateStatisticInfo();
+    void updateBWInfo();
+    void resetPerInterval();
+    void resetPages();
+    
+    void rightRatioCheck();
+        
+    void processWarmUpEvent();
+    EventFunctionWrapper warmUpEvent;
+    
+    void processRegularBalancedEvent();
+    EventFunctionWrapper regularBalancedEvent;
+    bool hasWarmedUp;
+    
+    std::vector<DRAMCtrl *> ctrlptrs;
+    
+    MasterID dmaDeviceId;
+    class SimObject *dmaDevicePtr;
+    
+    MasterID dirCtrlId;
+    class AbstractController *dirCtrlPtr;
+    
+    Tick timeInterval;
+    Tick timeWarmup;
+    
+    uint64_t totalInterval;
+    uint64_t skipInterval;
+    
+    
+    struct ChannelIdx mainMem_id;
+    struct ChannelIdx cacheMem_id;
+    
+    double avgMemLatencyPCM;
+    double avgMemLatencyDRAM;
+    double avgRdQLenPCM;
+    double avgRdQLenDRAM;
+    double avgWrQLenPCM;
+    double avgWrQLenDRAM;
+    double avgBWPCM;
+    double avgBWDRAM;
+    double avgWrBWPCM;
+    double avgWrBWDRAM;
+    
+    Tick avgTimeSwitchRowPCM;
+    Tick avgTimeSwitchRowDRAM;
+    
+    uint64_t pcmScore;
+    uint64_t dramScore;
 
-#endif //__MEM_HYBRID_MEM_HH__
+    const int DValueMax;
+    const int infDramMax;
+    const int infPcmMax;
+    
+    uint32_t refPagePerIntervalnum;
+    uint32_t refPageinDramPerIntervalnum;
+    uint32_t refPageinPcmPerIntervalnum;
+    
+    uint64_t reqInDramCount;
+    uint64_t reqInPcmCount;
+    uint64_t reqInDramCountPI;
+    
+    
+    // All statistics that the model needs to capture
+    Stats::Scalar intervalCount;
+    Stats::Scalar balanceCount;
+    Stats::Scalar unbalanceCount;
+    Stats::Scalar rightRatioSum;
+    
+    Stats::Formula rightRatio;
+    
+    Tick MigrationTimeStartAt;
+    Stats::Scalar totMemMigrationTime;
+    
+    size_t pendingReqsPriorMigration;
+    Stats::Scalar totBlockedReqsForMigration;
+};
+#endif

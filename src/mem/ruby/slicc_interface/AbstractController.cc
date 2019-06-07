@@ -63,6 +63,9 @@ AbstractController::AbstractController(const Params *p)
         // of this particular type.
         Stats::registerDumpCallback(new StatsCallback(this));
     }
+    
+    dmaDevicePtr = nullptr;
+    dmaDeviceId = 0;
 }
 
 void
@@ -75,6 +78,9 @@ AbstractController::init()
         m_delayVCHistogram.push_back(new Stats::Histogram());
         m_delayVCHistogram[i]->init(10);
     }
+    
+    dmaDevicePtr = SimObject::find ("system.pci_ide");
+    dmaDeviceId = params()->system->lookupMasterId(dmaDevicePtr);
 }
 
 void
@@ -289,8 +295,13 @@ AbstractController::queueMemoryWritePartial(const MachineID &id, Addr addr,
                                             Cycles latency,
                                             const DataBlock &block, int size)
 {
-    RequestPtr req = std::make_shared<Request>(addr, size, 0, m_masterId);
-
+    RequestPtr req = nullptr;
+    if (id.getType() == MachineType_DMA) {
+        req = std::make_shared<Request>(addr, size, 0, dmaDeviceId);
+    } else {
+        req = std::make_shared<Request>(addr, size, 0, m_masterId);
+    }
+    
     PacketPtr pkt = Packet::createWrite(req);
     pkt->allocate();
     pkt->setData(block.getData(getOffset(addr), size));
