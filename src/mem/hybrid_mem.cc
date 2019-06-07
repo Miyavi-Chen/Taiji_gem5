@@ -156,7 +156,12 @@ HybridMem::init()
         class FramePool *pool = pools.poolOf(channel_idx);
         
         if (pool->isPoolUsed()) { mainMem_id.val = ch; }
-        else { cacheMem_id.val = ch; break; }
+        else {
+            cacheMem_id.val = ch; pool->setDRAM();
+            pool->setRankBinsPtr(
+                new HybridMem::BinsInRanks(ctrlptrs[cacheMem_id.val]));
+            break;
+        }
     }
     ctrlptrs[cacheMem_id.val]->HybridMemID = masterId;
     ctrlptrs[mainMem_id.val]->HybridMemID = masterId;
@@ -185,7 +190,7 @@ void
 HybridMem::processWarmUpEvent()
 {
 
-    std::cout<<" HybridMem Warm up at"<<curTick() + 1<<std::endl;
+    std::cout<<" HybridMem Warm up at"<<curTick()<<std::endl;
     
     for (int i = 0; i < channelRanges.size(); ++i) {
         ctrlptrs[i]->resetAllStats();
@@ -778,6 +783,11 @@ HybridMem::tryIssueMigrationTask(class Page *page,
         masterId, page, toPhysAddr(page),
         _from, _to, granularity, cacheLineSize);
     migrationTasks.push_back(task);
+    ++(page->migrationCount);
+    page->lastMigrationInterval = totalInterval;
+    if (page->migrationCount > 1) {
+        ++badMigrationPageCount;
+    }
 
     if (sys->isTimingMode()) {
         if (false) {
@@ -2043,6 +2053,7 @@ HybridMem::resetStats() {
     unbalanceCount = 0;
     rightRatioSum = 0;
     totMemMigrationTime = 0;
+    lastWarmupAt =curTick();
 }
 
 void
@@ -2084,6 +2095,14 @@ HybridMem::regStats()
     totBlockedReqsForMigration
         .name(name() + ".totBlockedReqsForMigration")
         .desc("Total number of reqs blocked for migration");
+        
+    lastWarmupAt
+        .name(name() + ".lastWarmupAt")
+        .desc("last warmup/reset tick");
+    
+    badMigrationPageCount
+        .name(name() + ".badMigrationPageCount")
+        .desc("The count of page migrated to and back PCM/DRAM");
 }
 
 HybridMem*

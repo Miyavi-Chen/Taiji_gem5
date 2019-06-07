@@ -116,6 +116,189 @@ class HybridMem : public MemObject
                   PortID idx=InvalidPortID) override;
 
   protected:
+        
+    class BinEntry
+    {
+      public:
+        BinEntry(uint64_t _pagesPerBin)
+        : needRef(false), full(false), pagesPerBin(_pagesPerBin)
+        {
+          for (int i = 0; i < pagesPerBin; ++i) {
+              allocatedPagesPerBin.push_back(0);
+          }
+        }
+        
+        bool needRefresh () {return needRef;}
+        bool isFull () {return full;}
+        
+        int firstFreeFrame ()
+        {
+          assert(!full);
+          for (int i = 0; i < allocatedPagesPerBin.size(); ++i) {
+            if (!allocatedPagesPerBin[i]) { return i;}
+          }
+          return -1;
+        }
+        
+        void binUpdate ()
+        {
+          full = allocatedPagesPerBin[0];
+          needRef = allocatedPagesPerBin[0];
+          for (int i = 1; i < allocatedPagesPerBin.size(); ++i) {
+            full &= allocatedPagesPerBin[i];
+            needRef |= allocatedPagesPerBin[i];
+          }
+        }
+        
+        void binSet (int num)
+        {
+          allocatedPagesPerBin[num] = true;
+          binUpdate();
+        }
+        
+        void binReset (int num)
+        {
+          allocatedPagesPerBin[num] = false;
+          binUpdate();
+        }
+        
+      private:
+        bool needRef;
+        bool full;
+        uint64_t pagesPerBin;
+        std::vector<bool> allocatedPagesPerBin;
+    };
+    
+    class BinsOfRank//TBD
+    {
+      public:
+        BinsOfRank(uint64_t _pagesPerBin)
+        : full(false), nextFreeBin(0), pagesPerBin(_pagesPerBin)
+        {
+          for (int i=0; i < TOTALBINS; ++i) {
+            bins.push_back(BinEntry(pagesPerBin));
+          }
+        }
+
+        size_t getFreeFrame()
+        {
+          for (int i = nextFreeBin; i < bins.size();
+                ++i, nextFreeBin = (nextFreeBin + 1) % TOTALBINS) {
+            if (!bins[i].isFull()) {
+              int idx = bins[i].firstFreeFrame();
+              assert(idx != -1);
+              std::cout<<"BinsOfRank get bin "<<i<<" ";
+              std::cout<<"get idx "<<idx<<"\n";
+              return static_cast<size_t>(idx + i * pagesPerBin);
+            }
+          }
+          
+          full = true;
+          return std::numeric_limits<size_t>::max();
+        }
+        
+        bool isFull() { return full;}
+        
+        bool needRefresh (size_t binNum)
+        {
+          return bins[binNum].needRefresh();
+        }
+        
+        void allocFrame (size_t binNum, size_t idx)
+        {
+          bins[binNum].binSet(idx);
+        }
+        
+        void releaseFrame (size_t binNum, size_t idx)
+        {
+          bins[binNum].binReset(idx);
+          if (nextFreeBin > binNum) { nextFreeBin = binNum;}
+        }
+
+      private:
+        std::vector<class BinEntry> bins;
+        bool full;
+        size_t nextFreeBin;
+        uint64_t pagesPerBin;
+    };
+    
+    class BinsInRanks
+    {
+      public:
+        BinsInRanks(DRAMCtrl *_ctrlptrs)
+        : ctrlptrs(_ctrlptrs),
+        ranksPerChannel(ctrlptrs->ranksPerChannel),
+        pagesPerBin(ctrlptrs->pagesPerBin),
+        rowsPerBin(ctrlptrs->rowsPerBin), nextRank(0)
+        {
+          for (int i=0; i < ranksPerChannel; ++i) {
+            binsInRanks.push_back(BinsOfRank(pagesPerBin));
+          }
+        }
+        
+        size_t getFreeFrame ()
+        {
+          size_t pageNumOfRank = {std::numeric_limits<size_t>::max()};
+          for (int cnt=0; cnt < ranksPerChannel; 
+                ++cnt, nextRank = (nextRank+1)% ranksPerChannel) {
+            if (!binsInRanks[nextRank].isFull()) {
+              pageNumOfRank = binsInRanks[nextRank].getFreeFrame();
+              if (pageNumOfRank != std::numeric_limits<size_t>::max()) {
+                pageNumOfRank = pageNumOfRank*ranksPerChannel + nextRank;
+                break;
+              }
+            }
+          }
+          
+          nextRank = (nextRank + 1) % ranksPerChannel;
+          return pageNumOfRank;
+        }
+        
+        void allocFrame (size_t frameNum)
+        {
+          size_t pageNumOfRank = frameNum / ranksPerChannel;
+          size_t rank = frameNum % ranksPerChannel;
+          size_t binNum = pageNumOfRank / pagesPerBin;
+          size_t idx = pageNumOfRank % pagesPerBin;
+          binsInRanks[rank].allocFrame(binNum, idx);
+          updateCtrlRefTable(rank, binNum);
+          std::cout<<"BinsOfRank alloc bin "<<binNum<<" ";
+          std::cout<<"alloc idx "<<idx<<"\n";
+        }
+        
+        void releaseFrame (size_t frameNum)
+        {
+          size_t pageNumOfRank = frameNum / ranksPerChannel;
+          size_t rank = frameNum % ranksPerChannel;
+          size_t binNum = pageNumOfRank / pagesPerBin;
+          size_t idx = pageNumOfRank % pagesPerBin;
+          binsInRanks[rank].releaseFrame(binNum, idx);
+          updateCtrlRefTable(rank, binNum);
+          std::cout<<"BinsOfRank free bin "<<binNum<<" ";
+          std::cout<<"free idx "<<idx<<"\n";
+        }
+        
+        void updateCtrlRefTable (size_t rank, size_t binNum)
+        {
+          bool isValid = false;
+          if (binsInRanks[rank].needRefresh(binNum)) {
+            isValid = true;
+          } else {
+            //NA
+          }
+          ctrlptrs->updateCtrlRefTable(rank, binNum, isValid); 
+        }
+
+      private:
+        DRAMCtrl *ctrlptrs;
+        std::vector<class BinsOfRank> binsInRanks;
+        const uint32_t ranksPerChannel;
+        const uint64_t pagesPerBin;
+        const uint64_t rowsPerBin;
+        uint32_t nextRank;
+        
+    };
+
 
     class FrameInfo
     {
@@ -172,21 +355,40 @@ class HybridMem : public MemObject
           : RANGE(_range), FRAME_SIZE(_frameSize),
             frames(RANGE.size() / FRAME_SIZE),
             poolEmpty(false), poolUsed(false), nextTimeFrameIdx(0),
-            freeFrameSize(frames.size())
+            freeFrameSize(frames.size()), isDram(false), BinsInRanksPtr(nullptr)
         { }
+        
+        void setDRAM () {isDram = true;}
+        void setRankBinsPtr (BinsInRanks *_BinsInRanksPtr) {
+          BinsInRanksPtr = _BinsInRanksPtr;
+        }
 
         bool tryGetAnyFreeFrame(struct FrameAddr *_frame)
         {
           _frame->val = std::numeric_limits<Addr>::max();
           if (poolEmpty) { return false; }
-          for (size_t i = 0; i < frames.size(); ++i) {
-            size_t idx = ((nextTimeFrameIdx + i) % frames.size());
-            if (frames[idx].isFree()) {
+          //split dram/nvm here
+          //dram: get free page from bins of ranks
+          if (isDram) {
+            size_t idx = BinsInRanksPtr->getFreeFrame();
+            if (idx != std::numeric_limits<size_t>::max()) {
+              assert(frames[idx].isFree());
               _frame->val = (idx * FRAME_SIZE) + RANGE.start();
-              nextTimeFrameIdx = ((idx + 1) % frames.size());
               return true;
             }
+          } else {
+            assert(!isDram);
+            assert(BinsInRanksPtr == nullptr);
+            for (size_t i = 0; i < frames.size(); ++i) {
+              size_t idx = ((nextTimeFrameIdx + i) % frames.size());
+              if (frames[idx].isFree()) {
+                _frame->val = (idx * FRAME_SIZE) + RANGE.start();
+                nextTimeFrameIdx = ((idx + 1) % frames.size());
+                return true;
+              }
+            }
           }
+
           poolEmpty = true;
           return false;
         }
@@ -199,6 +401,8 @@ class HybridMem : public MemObject
           frames[i].assignOwner(_owner);
           --freeFrameSize;
           // assert(freeFrameSize >=0);
+          if (isDram) { BinsInRanksPtr->allocFrame(i);}
+          else {assert(!isDram); assert(BinsInRanksPtr == nullptr);}
         }
         void freeFrame(struct PageAddr _assigned, struct FrameAddr _frame)
         {
@@ -208,6 +412,8 @@ class HybridMem : public MemObject
           frames[i].eraseOwner(_assigned);
           poolEmpty = false;
           ++freeFrameSize;
+          if (isDram) { BinsInRanksPtr->releaseFrame(i);}
+          else {assert(!isDram); assert(BinsInRanksPtr == nullptr);}
         }
 
         struct PageAddr getOwner(struct FrameAddr _frame)
@@ -242,6 +448,8 @@ class HybridMem : public MemObject
         bool poolUsed;
         size_t nextTimeFrameIdx;
         size_t freeFrameSize;
+        bool isDram;
+        BinsInRanks *BinsInRanksPtr;
 
     };
 
@@ -375,7 +583,7 @@ class HybridMem : public MemObject
           readcount = writecount = migrationCount = 0;
           isDirty = isInDram = isPageCache = false;
           migrationIntervalTotal = lastMigrationInterval = 0;
-          RWScoresPerInterval = writeCountPerInterval = dirty_num = 0;
+          RWScoresPerInterval = dirty_num = 0;
           predictRowHit = predictRowMiss = lastAccessTick = 0;
           readreqPerInterval = writereqPerInterval = 0;
           lastAccessInterval = 0;
@@ -395,7 +603,6 @@ class HybridMem : public MemObject
         //score include read and write
         size_t RWScoresPerInterval;
         //only write
-        size_t writeCountPerInterval;
         size_t dirty_num;
 
         std::vector<Tick> access_tick;
@@ -567,14 +774,13 @@ class HybridMem : public MemObject
           if (isPageCache) {readcount = -64; writecount = -64;}
           else {readcount = 0; writecount = 0;}
           //observation
-          migrationCount = 0;
-          migrationIntervalTotal = 0;
-          lastMigrationInterval = 0;
+          // migrationCount = 0;
+          // migrationIntervalTotal = 0;
+          // lastMigrationInterval = 0;
 
           //score include read and write
           RWScoresPerInterval = 0;
           //only write
-          writeCountPerInterval = 0;
           dirty_num = 0;
 
           predictRowHit = 0;
@@ -1467,5 +1673,8 @@ class HybridMem : public MemObject
     
     size_t pendingReqsPriorMigration;
     Stats::Scalar totBlockedReqsForMigration;
+    
+    Stats::Scalar lastWarmupAt;
+    Stats::Scalar badMigrationPageCount;
 };
 #endif

@@ -235,6 +235,28 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     } else {
         panic("Unknown memory cell scheme!");
     }
+    
+    pageCounts = capacity / system()->getPageBytes();
+    rowsPerBin = rowsPerBank / TOTALBINS;
+    pagesPerRow = rowBufferSize / system()->getPageBytes();
+    pagesPerBin = rowsPerBin * pagesPerRow;
+    
+    if (binsNeedREF == nullptr) {
+        binsNeedREF = new std::vector<std::vector<int> *>();
+        
+        for (int r = 0; r < ranksPerChannel; ++r) {
+            binsNeedREF->push_back(new std::vector<int>());
+            for (int i = 0; i < TOTALBINS; ++i) {
+                binsNeedREF->at(r)->push_back(0);
+            }
+        }
+    }
+    
+    
+    // std::unordered_map<std::string, int>::iterator iter;
+    // for (iter = binsNeedREF->begin(); iter != binsNeedREF->end(); ++iter) {
+    //     std::cout<<iter->first<< " "<<iter->second<<std::endl;
+    // }
 
 }
 
@@ -425,6 +447,18 @@ DRAMCtrl::resetPerInterval()
         }
     }
 }
+
+void
+DRAMCtrl::updateCtrlRefTable(size_t rank, size_t binNum, bool isValid)
+{   
+    if (isValid) {
+        binsNeedREF->at(rank)->at(binNum) = 1;
+    } else {
+        binsNeedREF->at(rank)->at(binNum) = 0;         
+    }
+    return;
+}
+
 
 Tick
 DRAMCtrl::avgTimeSwitchRow()
@@ -915,6 +949,23 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
         totGap += curTick() - prevArrival;
     }
     prevArrival = curTick();
+    
+    //handle valid/invalid page
+    // if(pkt->isInvalidPage() || pkt->isValidPage()) {
+    //     Addr addr = pkt->getRaw<Addr>();
+    //     addr = addr / columnsPerRowBuffer / channels / banksPerRank;
+    //     uint64_t rank = addr % ranksPerChannel;
+    //     addr = addr / ranksPerChannel;
+    //     // lastly, get the row bits, no need to remove them from addr
+    //     uint64_t rowNum = addr % rowsPerBank;
+        
+    //     if (pkt->isInvalidPage()) {
+    //         binsNeedREF->at(rank)->at(rowNum / rowsPerBin)++;
+    //     }else {
+    //         binsNeedREF->at(rank)->at(rowNum / rowsPerBin)--;         
+    //     }
+    //     return true;
+    // }
     
     //miyavi outputfile
     if (fileP.is_open()) {
@@ -2182,7 +2233,8 @@ DRAMCtrl::Rank::Rank(DRAMCtrl& _memory, const DRAMCtrlParams* _p, int rank)
     : EventManager(&_memory), memory(_memory),
       pwrStateTrans(PWR_IDLE), pwrStatePostRefresh(PWR_IDLE),
       pwrStateTick(0), refreshDueAt(0), pwrState(PWR_IDLE),
-      refreshState(REF_IDLE), inLowPowerState(false), rank(rank),
+      refreshState(REF_IDLE), tmpREFState(REF_IDLE), nextREFBin(0),
+      inLowPowerState(false), rank(rank),
       readEntries(0), writeEntries(0), outstandingEvents(0),
       wakeUpAllowedAt(0), power(_p, false), banks(_p->banks_per_rank),
       numBanksActive(0), actTicks(_p->activation_limit, 0),
@@ -2345,6 +2397,31 @@ DRAMCtrl::Rank::processWriteDoneEvent()
 void
 DRAMCtrl::Rank::processRefreshEvent()
 {
+    //skip refresh if count of bin refreshed this time is 0
+    if(!memory.binsNeedREF->at(rank)->at(nextREFBin)) {
+        tmpREFState = refreshState;
+        refreshState = REF_PASS;
+    }
+    
+    if(refreshState == REF_PASS) {
+        refreshState = tmpREFState;
+        tmpREFState = REF_IDLE;
+        std::cout<<"Skip Ref at Bin: "<<nextREFBin<<"\n";
+        
+        // Update for next refresh
+        refreshDueAt += memory.tREFI;
+        nextREFBin = (nextREFBin + 1) % TOTALBINS ;
+        if (!refreshEvent.scheduled())
+            schedule(refreshEvent, refreshDueAt);
+        else
+        // move it sooner in time
+            reschedule(refreshEvent, refreshDueAt);
+        
+        return;
+    }else {
+        //nothing
+    }
+    
     // when first preparing the refresh, remember when it was due
     if ((refreshState == REF_IDLE) || (refreshState == REF_SREF_EXIT)) {
         // remember when the refresh is due
@@ -2746,6 +2823,8 @@ DRAMCtrl::Rank::processPowerEvent()
             // Schedule a refresh which kicks things back into action
             // when it finishes
             refreshState = REF_SREF_EXIT;
+            nextREFBin = nextREFBin + (duration + memory.tXS) / memory.tREFI;
+            nextREFBin %= TOTALBINS;
             schedule(refreshEvent, curTick() + memory.tXS);
         } else {
             // if we have a pending refresh, and are now moving to

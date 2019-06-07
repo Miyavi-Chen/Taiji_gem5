@@ -73,6 +73,7 @@
 #include "params/DRAMCtrl.hh"
 #include "sim/eventq.hh"
 
+#define TOTALBINS 8192
 /**
  * The DRAM controller is a single-channel memory controller capturing
  * the most important timing constraints associated with a
@@ -289,7 +290,8 @@ class DRAMCtrl : public QoS::MemCtrl
          REF_SREF_EXIT,
          REF_PRE,
          REF_START,
-         REF_RUN
+         REF_RUN,
+         REF_PASS
      };
 
     /**
@@ -394,10 +396,19 @@ class DRAMCtrl : public QoS::MemCtrl
          */
         PowerState pwrState;
 
-       /**
+        /**
          * current refresh state
          */
         RefreshState refreshState;
+        
+        /**
+         * tmp refresh state
+         */
+        RefreshState tmpREFState;
+        /**
+         * next refresh bin number
+         */
+        uint64_t nextREFBin;
 
         /**
          * rank is in or transitioning to power-down or self-refresh
@@ -1294,12 +1305,19 @@ class DRAMCtrl : public QoS::MemCtrl
      *
      */
     bool allRanksDrained() const;
+    
+    /*refresh count related parameters*/
+    uint64_t pageCounts;
+    uint64_t rowsPerBin;
+    float pagesPerRow;
+    uint64_t pagesPerBin;
+    std::vector<std::vector<int> *> *binsNeedREF = nullptr;
     /**
      * Reset all stats
      */
     void resetAllStats();
     void resetPerInterval();
-    
+    void updateCtrlRefTable(size_t rank, size_t binNum, bool isValid);
     Tick avgTimeSwitchRow();
     
 
