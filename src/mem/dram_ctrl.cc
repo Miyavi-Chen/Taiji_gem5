@@ -107,7 +107,7 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     frontendLatency(p->static_frontend_latency),
     backendLatency(p->static_backend_latency),
     nextBurstAt(0), prevArrival(0),
-    nextReqTime(0), 
+    nextReqTime(0),
     activeRank(0), timeStampOffset(0),
     lastStatsResetTick(0), HybridMemID(0), DMAID(0),
     lastRdQLen(0), lastWrQLen(0),
@@ -117,6 +117,7 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     calInterval(p->cal_interval),
     rdReqWaitingTicks(0), rdReqWaitingTimes(0),
     wrReqWaitingTicks(0), wrReqWaitingTimes(0),
+    enableDRAMPowerdown(p->enable_dram_powerdown),
     rdReqDeadlockEvent([this]{ rdReqDeadlock(); }, name()),
     wrReqDeadlockEvent([this]{ wrReqDeadlock(); }, name()),
     calculateWaitingEvent([this]{ calculateWaiting(); }, name())
@@ -235,15 +236,15 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     } else {
         panic("Unknown memory cell scheme!");
     }
-    
+
     pageCounts = capacity / system()->getPageBytes();
     rowsPerBin = rowsPerBank / TOTALBINS;
     pagesPerRow = rowBufferSize / system()->getPageBytes();
     pagesPerBin = rowsPerBin * pagesPerRow;
-    
+
     if (binsNeedREF == nullptr) {
         binsNeedREF = new std::vector<std::vector<int> *>();
-        
+
         for (int r = 0; r < ranksPerChannel; ++r) {
             binsNeedREF->push_back(new std::vector<int>());
             for (int i = 0; i < TOTALBINS; ++i) {
@@ -251,8 +252,8 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
             }
         }
     }
-    
-    
+
+
     // std::unordered_map<std::string, int>::iterator iter;
     // for (iter = binsNeedREF->begin(); iter != binsNeedREF->end(); ++iter) {
     //     std::cout<<iter->first<< " "<<iter->second<<std::endl;
@@ -270,7 +271,7 @@ DRAMCtrl::init()
     } else {
         port.sendRangeChange();
     }
-    
+
     HybridMemptr = nullptr;
     HybridMemptr = \
     reinterpret_cast<HybridMem *>(SimObject::find ("system.hybrid_mem"));
@@ -339,7 +340,7 @@ DRAMCtrl::startup()
         // the next request, this will add an insignificant bubble at the
         // start of simulation
         nextBurstAt = curTick() + tRP + tRCD;
-        
+
         lastRdQLenTick = curTick();
         lastWrQLenTick = curTick();
     }
@@ -439,7 +440,7 @@ DRAMCtrl::resetPerInterval()
     writeBurstsPI = 0;
     bytesReadDRAMPI = 0;
     bytesWrittenPI = 0;
-    
+
     for (auto rank: ranks) {
         for (int i = 0;i < rank->banks.size(); ++i) {
             rank->banks[i].Total_Tick_between_diff_rows = 0;
@@ -450,11 +451,11 @@ DRAMCtrl::resetPerInterval()
 
 void
 DRAMCtrl::updateCtrlRefTable(size_t rank, size_t binNum, bool isValid)
-{   
+{
     if (isValid) {
         binsNeedREF->at(rank)->at(binNum) = 1;
     } else {
-        binsNeedREF->at(rank)->at(binNum) = 0;         
+        binsNeedREF->at(rank)->at(binNum) = 0;
     }
     return;
 }
@@ -479,7 +480,7 @@ DRAMCtrl::avgTimeSwitchRow()
         std::max(SumCountofSwitchRows, uint32_t(1));
     avg_time_switch_row_pcm = Sum_Tick_between_diff_rows /
                                 SumCountofSwitchRows;
-                                
+
     return avg_time_switch_row_pcm;
 }
 
@@ -591,8 +592,8 @@ DRAMCtrl::writeQueueFull(unsigned int neededEntries) const
 }
 
 DRAMCtrl::DRAMPacket*
-DRAMCtrl::decodeAddr(PacketPtr pkt, Addr dramPktAddr, unsigned size,
-                       bool isRead)
+DRAMCtrl::decodeAddr(const PacketPtr pkt, Addr dramPktAddr, unsigned size,
+                     bool isRead) const
 {
     // decode the address based on the address mapping scheme, with
     // Ro, Ra, Co, Ba and Ch denoting row, rank, column, bank and
@@ -784,7 +785,7 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
             // avgRdQLen = totalReadQueueSize + respQueue.size();
             avgRdQLen = readQueueSizes[1];
             avgRdQLenPI = readQueueSizes[1];
-            
+
             auto rdQLen = totalReadQueueSize + respQueue.size();
             assert(((lastRdQLen > rdQLen) && ((lastRdQLen - rdQLen) == 1)) ||
                    ((rdQLen > lastRdQLen) && ((rdQLen - lastRdQLen) == 1)));
@@ -864,7 +865,7 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
             // Update stats
             avgWrQLen = totalWriteQueueSize;
             avgWrQLenPI = writeQueueSizes[1];
-            
+
             auto wrQLen = totalWriteQueueSize;
             assert(((lastWrQLen > wrQLen) && ((lastWrQLen - wrQLen) == 1)) ||
                    ((wrQLen > lastWrQLen) && ((wrQLen - lastWrQLen) == 1)));
@@ -949,7 +950,7 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
         totGap += curTick() - prevArrival;
     }
     prevArrival = curTick();
-    
+
     //handle valid/invalid page
     // if(pkt->isInvalidPage() || pkt->isValidPage()) {
     //     Addr addr = pkt->getRaw<Addr>();
@@ -958,15 +959,15 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
     //     addr = addr / ranksPerChannel;
     //     // lastly, get the row bits, no need to remove them from addr
     //     uint64_t rowNum = addr % rowsPerBank;
-        
+
     //     if (pkt->isInvalidPage()) {
     //         binsNeedREF->at(rank)->at(rowNum / rowsPerBin)++;
     //     }else {
-    //         binsNeedREF->at(rank)->at(rowNum / rowsPerBin)--;         
+    //         binsNeedREF->at(rank)->at(rowNum / rowsPerBin)--;
     //     }
     //     return true;
     // }
-    
+
     //miyavi outputfile
     if (fileP.is_open()) {
         stringstream ss;
@@ -995,7 +996,7 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
         fileP.open(fileName, ios::out | ios::trunc);
         panic_if(!fileP.is_open(), "%s Create fail!\n", fileName);
     }
-    
+
 
     // Find out how many dram packets a pkt translates to
     // If the burst size is equal or larger than the pkt size, then a pkt
@@ -1009,41 +1010,13 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
     qosSchedule( { &readQueue, &writeQueue }, burstSize, pkt);
 
     // check local buffers and do not accept if full
-    if (pkt->isRead()) {
-        assert(size != 0);
-        if (readQueueFull(dram_pkt_count)) {
-            DPRINTF(DRAM, "Read queue full, not accepting\n");
-            // remember that we have to retry this port
-            retryRdReq = true;
-            
-            assert(rdReqWaitingTick == std::numeric_limits<Tick>::max());
-            rdReqWaitingTick = curTick();
-
-            schedule(rdReqDeadlockEvent, curTick() + deadlockThreshold);
-            if (!calculateWaitingEvent.scheduled()) {
-                resetWaitingCounter();
-                schedule(calculateWaitingEvent, curTick() + calInterval);
-            }
-            
-            numRdRetry++;
-            return false;
-        } else {
-            addToReadQueue(pkt, dram_pkt_count);
-            readReqs++;
-            bytesReadSys += size;
-            if (pkt->masterId() == DMAID) {
-                readReqsDMA++;
-                bytesReadSysDMA += size;
-            }
-        }
-    } else {
-        assert(pkt->isWrite());
+    if (pkt->isWrite()) {
         assert(size != 0);
         if (writeQueueFull(dram_pkt_count)) {
             DPRINTF(DRAM, "Write queue full, not accepting\n");
             // remember that we have to retry this port
             retryWrReq = true;
-            
+
             assert(wrReqWaitingTick == std::numeric_limits<Tick>::max());
             wrReqWaitingTick = curTick();
 
@@ -1052,7 +1025,7 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
                 resetWaitingCounter();
                 schedule(calculateWaitingEvent, curTick() + calInterval);
             }
-            
+
             numWrRetry++;
             return false;
         } else {
@@ -1062,6 +1035,34 @@ DRAMCtrl::recvTimingReq(PacketPtr pkt)
             if (pkt->masterId() == DMAID) {
                 writeReqsDMA++;
                 bytesWrittenSysDMA += size;
+            }
+        }
+    } else {
+        assert(pkt->isRead());
+        assert(size != 0);
+        if (readQueueFull(dram_pkt_count)) {
+            DPRINTF(DRAM, "Read queue full, not accepting\n");
+            // remember that we have to retry this port
+            retryRdReq = true;
+
+            assert(rdReqWaitingTick == std::numeric_limits<Tick>::max());
+            rdReqWaitingTick = curTick();
+
+            schedule(rdReqDeadlockEvent, curTick() + deadlockThreshold);
+            if (!calculateWaitingEvent.scheduled()) {
+                resetWaitingCounter();
+                schedule(calculateWaitingEvent, curTick() + calInterval);
+            }
+
+            numRdRetry++;
+            return false;
+        } else {
+            addToReadQueue(pkt, dram_pkt_count);
+            readReqs++;
+            bytesReadSys += size;
+            if (pkt->masterId() == DMAID) {
+                readReqsDMA++;
+                bytesReadSysDMA += size;
             }
         }
     }
@@ -1098,7 +1099,7 @@ DRAMCtrl::processRespondEvent()
     // track if this is the last packet before idling
     // and that there are no outstanding commands to this rank
     if (dram_pkt->rankRef.isQueueEmpty() &&
-        dram_pkt->rankRef.outstandingEvents == 0) {
+        dram_pkt->rankRef.outstandingEvents == 0 && enableDRAMPowerdown) {
         // verify that there are no events scheduled
         assert(!dram_pkt->rankRef.activateEvent.scheduled());
         assert(!dram_pkt->rankRef.prechargeEvent.scheduled());
@@ -1140,7 +1141,7 @@ DRAMCtrl::processRespondEvent()
     respQueue.pop_front();
     rdQLenPdf[totalReadQueueSize + respQueue.size()]++;
 
-    
+
     auto rdQLen = totalReadQueueSize + respQueue.size();
     assert(((lastRdQLen > rdQLen) && ((lastRdQLen - rdQLen) == 1)) ||
             ((rdQLen > lastRdQLen) && ((rdQLen - lastRdQLen) == 1)));
@@ -1182,7 +1183,7 @@ DRAMCtrl::processRespondEvent()
         assert(curTick() >= rdReqWaitingTick);
         rdQLenTicks[readBufferSize + 1] += (curTick() - rdReqWaitingTick);
         rdReqWaitingTick = std::numeric_limits<Tick>::max();
-        
+
         retryRdReq = false;
         port.sendRetryReq();
     }
@@ -1564,7 +1565,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         // nothing to do
     } else {
         row_hit = false;
-        
+
         bank.Total_Tick_between_diff_rows += curTick() - bank.pre_switch_tick;
         bank.count_of_switch_rows++;
         bank.pre_switch_tick = curTick();
@@ -1583,17 +1584,17 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         activateBank(rank, bank, act_tick, dram_pkt->row);
         assert(bank.rowState == Bank::RowState::ROW_CLEAN);
     }
-    
+
     // if (name() == "system.mem_ctrls1")
     //     std::cout<<std::flush;
-    if (dram_pkt->masterId() != HybridMemID && 
+    if (dram_pkt->masterId() != HybridMemID &&
             (dram_pkt->isRead() || dram_pkt->isWrite())) {
         const Addr mem_addr = dram_pkt->getPhysAddr();
-        struct HybridMem::PageAddr pageAddr = 
+        struct HybridMem::PageAddr pageAddr =
                                 HybridMemptr->toMemAddr(mem_addr);
         HybridMemptr->CountScoreinc(pageAddr, dram_pkt->isRead(), row_hit, dram_pkt->QLen);
     }
-    
+
 
     // respect any constraints on the command (e.g. tRCD or tCCD)
     const Tick col_allowed_at = dram_pkt->isRead() ?
@@ -1788,7 +1789,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         } else {
             totMemAccLatMigration += dram_pkt->readyTime - dram_pkt->entryTime;
         }
-        
+
         masterReadTotalLat[dram_pkt->masterId()] +=
             dram_pkt->readyTime - dram_pkt->entryTime;
 
@@ -1803,7 +1804,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         bytesWritten += burstSize;
         bytesWrittenPI += burstSize;
         perBankWrBursts[dram_pkt->bankId]++;
-        
+
         // Update latency stats
         // totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
         // totMemAccLatPI += dram_pkt->readyTime - dram_pkt->entryTime;
@@ -2077,7 +2078,7 @@ DRAMCtrl::processNextReqEvent()
         logResponse(MemCtrl::WRITE, dram_pkt->masterId(),
                     dram_pkt->qosValue(), dram_pkt->getAddr(), 1,
                     dram_pkt->readyTime - dram_pkt->entryTime);
-                    
+
         auto wrQLen = totalWriteQueueSize;
         assert(((lastWrQLen > wrQLen) && ((lastWrQLen - wrQLen) == 1)) ||
                 ((wrQLen > lastWrQLen) && ((wrQLen - lastWrQLen) == 1)));
@@ -2138,7 +2139,7 @@ DRAMCtrl::processNextReqEvent()
         assert(curTick() >= wrReqWaitingTick);
         wrQLenTicks[writeBufferSize + 1] += (curTick() - wrReqWaitingTick);
         wrReqWaitingTick = std::numeric_limits<Tick>::max();
-        
+
         retryWrReq = false;
         port.sendRetryReq();
     }
@@ -2367,7 +2368,8 @@ DRAMCtrl::Rank::processPrechargeEvent()
     if (numBanksActive == 0) {
         // no reads to this rank in the Q and no pending
         // RD/WR or refresh commands
-        if (isQueueEmpty() && outstandingEvents == 0) {
+        if (isQueueEmpty() && outstandingEvents == 0 &&
+            memory.enableDRAMPowerdown) {
             // should still be in ACT state since bank still open
             assert(pwrState == PWR_ACT);
 
@@ -2402,12 +2404,12 @@ DRAMCtrl::Rank::processRefreshEvent()
         tmpREFState = refreshState;
         refreshState = REF_PASS;
     }
-    
+
     if(refreshState == REF_PASS) {
         refreshState = tmpREFState;
         tmpREFState = REF_IDLE;
         std::cout<<"Skip Ref at Bin: "<<nextREFBin<<"\n";
-        
+
         // Update for next refresh
         refreshDueAt += memory.tREFI;
         nextREFBin = (nextREFBin + 1) % TOTALBINS ;
@@ -2416,12 +2418,12 @@ DRAMCtrl::Rank::processRefreshEvent()
         else
         // move it sooner in time
             reschedule(refreshEvent, refreshDueAt);
-        
+
         return;
     }else {
         //nothing
     }
-    
+
     // when first preparing the refresh, remember when it was due
     if ((refreshState == REF_IDLE) || (refreshState == REF_SREF_EXIT)) {
         // remember when the refresh is due
@@ -2593,7 +2595,7 @@ DRAMCtrl::Rank::processRefreshEvent()
 
             // Force PRE power-down if there are no outstanding commands
             // in Q after refresh.
-            } else if (isQueueEmpty()) {
+            } else if (isQueueEmpty() && memory.enableDRAMPowerdown) {
                 // still have refresh event outstanding but there should
                 // be no other events outstanding
                 assert(outstandingEvents == 1);
@@ -2866,7 +2868,8 @@ DRAMCtrl::Rank::processPowerEvent()
         // will issue refresh immediately upon entry
         if (pwrStatePostRefresh == PWR_PRE_PDN && isQueueEmpty() &&
            (memory.drainState() != DrainState::Draining) &&
-           (memory.drainState() != DrainState::Drained)) {
+           (memory.drainState() != DrainState::Drained) &&
+           memory.enableDRAMPowerdown) {
             DPRINTF(DRAMState, "Rank %d bypassing refresh and transitioning "
                     "to self refresh at %11u tick\n", rank, curTick());
             powerDownSleep(PWR_SREF, curTick());
@@ -3049,7 +3052,7 @@ DRAMCtrl::regStats()
     readReqs
         .name(name() + ".readReqs")
         .desc("Number of read requests accepted");
-        
+
     readReqsDMA
         .name(name() + ".readReqsDMA")
         .desc("Number of DMA read requests accepted");
@@ -3057,7 +3060,7 @@ DRAMCtrl::regStats()
     writeReqs
         .name(name() + ".writeReqs")
         .desc("Number of write requests accepted");
-        
+
     writeReqsDMA
         .name(name() + ".writeReqsDMA")
         .desc("Number of DMA write requests accepted");
@@ -3066,7 +3069,7 @@ DRAMCtrl::regStats()
         .name(name() + ".readBursts")
         .desc("Number of DRAM read bursts, "
               "including those serviced by the write queue");
-              
+
     readBurstsPI
         .name(name() + ".readBurstsPI")
         .desc("Number of DRAM read bursts, "
@@ -3076,7 +3079,7 @@ DRAMCtrl::regStats()
         .name(name() + ".writeBursts")
         .desc("Number of DRAM write bursts, "
               "including those merged in the write queue");
-              
+
     writeBurstsPI
         .name(name() + ".writeBurstsPI")
         .desc("Number of DRAM write bursts, "
@@ -3085,7 +3088,7 @@ DRAMCtrl::regStats()
     servicedByWrQ
         .name(name() + ".servicedByWrQ")
         .desc("Number of DRAM read bursts serviced by the write queue");
-        
+
     servicedByWrQPI
         .name(name() + ".servicedByWrQPI")
         .desc("Number of DRAM read bursts serviced by the write queue "
@@ -3113,7 +3116,7 @@ DRAMCtrl::regStats()
         .name(name() + ".avgRdQLen")
         .desc("Average read queue length when enqueuing")
         .precision(2);
-        
+
     avgRdQLenPI
         .name(name() + ".avgRdQLenPI")
         .desc("Average read queue length when enqueuing per-interval")
@@ -3123,7 +3126,7 @@ DRAMCtrl::regStats()
         .name(name() + ".avgWrQLen")
         .desc("Average write queue length when enqueuing")
         .precision(2);
-        
+
     avgWrQLenPI
         .name(name() + ".avgWrQLenPI")
         .desc("Average write queue length when enqueuing per-interval")
@@ -3132,7 +3135,7 @@ DRAMCtrl::regStats()
     totQLat
         .name(name() + ".totQLat")
         .desc("Total ticks spent queuing");
-        
+
     totQLatPI
         .name(name() + ".totQLatPI")
         .desc("Total ticks spent queuing per interval");
@@ -3145,12 +3148,12 @@ DRAMCtrl::regStats()
         .name(name() + ".totMemAccLat")
         .desc("Total ticks spent from burst creation until serviced "
               "by the DRAM");
-              
+
     totMemAccLatPI
         .name(name() + ".totMemAccLatPI")
         .desc("Total ticks spent from burst creation until serviced "
               "by the DRAM per interval");
-              
+
     totMemAccLatMigration
         .name(name() + ".totMemAccLatMigration")
         .desc("Total ticks spent from burst creation until serviced "
@@ -3160,7 +3163,7 @@ DRAMCtrl::regStats()
         .name(name() + ".avgQLat")
         .desc("Average queueing delay per DRAM burst")
         .precision(2);
-        
+
     avgQLatPI
         .name(name() + ".avgQLatPI")
         .desc("Average queueing delay per DRAM burst per interval")
@@ -3180,7 +3183,7 @@ DRAMCtrl::regStats()
         .name(name() + ".avgMemAccLat")
         .desc("Average memory access latency per DRAM burst")
         .precision(2);
-        
+
     avgMemAccLatPI
         .name(name() + ".avgMemAccLatPI")
         .desc("Average memory access latency per DRAM burst per interval")
@@ -3238,7 +3241,7 @@ DRAMCtrl::regStats()
         .init(writeBufferSize)
         .name(name() + ".wrQLenPdf")
         .desc("What write queue length does an incoming req see");
-        
+
     rdQLenTimes
         .init(readBufferSize + 2)
         .name(name() + ".rdQLenTimes")
@@ -3280,7 +3283,7 @@ DRAMCtrl::regStats()
     bytesReadDRAM
         .name(name() + ".bytesReadDRAM")
         .desc("Total number of bytes read from DRAM");
-        
+
     bytesReadDRAMPI
         .name(name() + ".bytesReadDRAMPI")
         .desc("Total number of bytes read from DRAM per interval");
@@ -3292,7 +3295,7 @@ DRAMCtrl::regStats()
     bytesWritten
         .name(name() + ".bytesWritten")
         .desc("Total number of bytes written to DRAM");
-        
+
     bytesWrittenPI
         .name(name() + ".bytesWrittenPI")
         .desc("Total number of bytes written to DRAM per interval");
@@ -3300,7 +3303,7 @@ DRAMCtrl::regStats()
     bytesReadSys
         .name(name() + ".bytesReadSys")
         .desc("Total read bytes from the system interface side");
-        
+
     bytesReadSysDMA
         .name(name() + ".bytesReadSysDMA")
         .desc("Total DMA read bytes from the system interface side");
@@ -3308,7 +3311,7 @@ DRAMCtrl::regStats()
     bytesWrittenSys
         .name(name() + ".bytesWrittenSys")
         .desc("Total written bytes from the system interface side");
-        
+
     bytesWrittenSysDMA
         .name(name() + ".bytesWrittenSysDMA")
         .desc("Total DMA written bytes from the system interface side");
@@ -3319,7 +3322,7 @@ DRAMCtrl::regStats()
         .precision(2);
 
     avgRdBW = (bytesReadDRAM / 1000000) / simSeconds;
-    
+
     avgRdBWPI
         .name(name() + ".avgRdBWPI")
         .desc("Average DRAM read bandwidth in MiByte/s per interval")
@@ -3333,7 +3336,7 @@ DRAMCtrl::regStats()
         .precision(2);
 
     avgWrBW = (bytesWritten / 1000000) / simSeconds;
-    
+
     avgWrBWPI
         .name(name() + ".avgWrBWPI")
         .desc("Average achieved write bandwidth in MiByte/s per interval")
@@ -3510,7 +3513,7 @@ Port &
 DRAMCtrl::getPort(const string &if_name, PortID idx)
 {
     if (if_name != "port") {
-        return MemObject::getPort(if_name, idx);
+        return QoS::MemCtrl::getPort(if_name, idx);
     } else {
         return port;
     }

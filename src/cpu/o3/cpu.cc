@@ -351,11 +351,6 @@ FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
     commit.setROB(&rob);
 
     lastActivatedCycle = 0;
-#if 0
-    // Give renameMap & rename stage access to the freeList;
-    for (ThreadID tid = 0; tid < numThreads; tid++)
-        globalSeqNum[tid] = 1;
-#endif
 
     DPRINTF(O3CPU, "Creating O3CPU object.\n");
 
@@ -689,11 +684,11 @@ FullO3CPU<Impl>::activateThread(ThreadID tid)
     list<ThreadID>::iterator isActive =
         std::find(activeThreads.begin(), activeThreads.end(), tid);
 
-    DPRINTF(O3CPU, "[tid:%i]: Calling activate thread.\n", tid);
+    DPRINTF(O3CPU, "[tid:%i] Calling activate thread.\n", tid);
     assert(!switchedOut());
 
     if (isActive == activeThreads.end()) {
-        DPRINTF(O3CPU, "[tid:%i]: Adding to active threads list\n",
+        DPRINTF(O3CPU, "[tid:%i] Adding to active threads list\n",
                 tid);
 
         activeThreads.push_back(tid);
@@ -708,11 +703,11 @@ FullO3CPU<Impl>::deactivateThread(ThreadID tid)
     list<ThreadID>::iterator thread_it =
         std::find(activeThreads.begin(), activeThreads.end(), tid);
 
-    DPRINTF(O3CPU, "[tid:%i]: Calling deactivate thread.\n", tid);
+    DPRINTF(O3CPU, "[tid:%i] Calling deactivate thread.\n", tid);
     assert(!switchedOut());
 
     if (thread_it != activeThreads.end()) {
-        DPRINTF(O3CPU,"[tid:%i]: Removing from active threads list\n",
+        DPRINTF(O3CPU,"[tid:%i] Removing from active threads list\n",
                 tid);
         activeThreads.erase(thread_it);
     }
@@ -790,7 +785,7 @@ template <class Impl>
 void
 FullO3CPU<Impl>::suspendContext(ThreadID tid)
 {
-    DPRINTF(O3CPU,"[tid: %i]: Suspending Thread Context.\n", tid);
+    DPRINTF(O3CPU,"[tid:%i] Suspending Thread Context.\n", tid);
     assert(!switchedOut());
 
     deactivateThread(tid);
@@ -812,7 +807,7 @@ void
 FullO3CPU<Impl>::haltContext(ThreadID tid)
 {
     //For now, this is the same as deallocate
-    DPRINTF(O3CPU,"[tid:%i]: Halt Context called. Deallocating\n", tid);
+    DPRINTF(O3CPU,"[tid:%i] Halt Context called. Deallocating\n", tid);
     assert(!switchedOut());
 
     deactivateThread(tid);
@@ -915,47 +910,6 @@ FullO3CPU<Impl>::removeThread(ThreadID tid)
         iew.resetEntries();
     }
 */
-}
-
-template <class Impl>
-Fault
-FullO3CPU<Impl>::hwrei(ThreadID tid)
-{
-#if THE_ISA == ALPHA_ISA
-    // Need to clear the lock flag upon returning from an interrupt.
-    this->setMiscRegNoEffect(AlphaISA::MISCREG_LOCKFLAG, false, tid);
-
-    this->thread[tid]->kernelStats->hwrei();
-
-    // FIXME: XXX check for interrupts? XXX
-#endif
-    return NoFault;
-}
-
-template <class Impl>
-bool
-FullO3CPU<Impl>::simPalCheck(int palFunc, ThreadID tid)
-{
-#if THE_ISA == ALPHA_ISA
-    if (this->thread[tid]->kernelStats)
-        this->thread[tid]->kernelStats->callpal(palFunc,
-                                                this->threadContexts[tid]);
-
-    switch (palFunc) {
-      case PAL::halt:
-        halt();
-        if (--System::numSystemsRunning == 0)
-            exitSimLoop("all cpus halted");
-        break;
-
-      case PAL::bpt:
-      case PAL::bugchk:
-        if (this->system->breakpoint())
-            return false;
-        break;
-    }
-#endif
-    return true;
 }
 
 template <class Impl>

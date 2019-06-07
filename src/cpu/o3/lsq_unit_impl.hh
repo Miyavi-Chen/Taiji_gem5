@@ -542,6 +542,15 @@ LSQUnit<Impl>::executeLoad(const DynInstPtr &inst)
 
     load_fault = inst->initiateAcc();
 
+    if (load_fault == NoFault && !inst->readMemAccPredicate()) {
+        assert(inst->readPredicate());
+        inst->setExecuted();
+        inst->completeAcc(nullptr);
+        iewStage->instToCommit(inst);
+        iewStage->activityThisCycle();
+        return NoFault;
+    }
+
     if (inst->isTranslationDelayed() && load_fault == NoFault)
         return load_fault;
 
@@ -1091,7 +1100,7 @@ LSQUnit<Impl>::dumpInsts() const
 
     for (const auto& e: loadQueue) {
         const DynInstPtr &inst(e.instruction());
-        cprintf("%s.[sn:%i] ", inst->pcState(), inst->seqNum);
+        cprintf("%s.[sn:%llu] ", inst->pcState(), inst->seqNum);
     }
     cprintf("\n");
 
@@ -1100,7 +1109,7 @@ LSQUnit<Impl>::dumpInsts() const
 
     for (const auto& e: storeQueue) {
         const DynInstPtr &inst(e.instruction());
-        cprintf("%s.[sn:%i] ", inst->pcState(), inst->seqNum);
+        cprintf("%s.[sn:%llu] ", inst->pcState(), inst->seqNum);
     }
 
     cprintf("\n");

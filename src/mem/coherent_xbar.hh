@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2015, 2017 ARM Limited
+ * Copyright (c) 2011-2015, 2017, 2019 ARM Limited
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -123,7 +123,13 @@ class CoherentXBar : public BaseXBar
         Tick
         recvAtomic(PacketPtr pkt) override
         {
-            return xbar.recvAtomic(pkt, id);
+            return xbar.recvAtomicBackdoor(pkt, id);
+        }
+
+        Tick
+        recvAtomicBackdoor(PacketPtr pkt, MemBackdoorPtr &backdoor) override
+        {
+            return xbar.recvAtomicBackdoor(pkt, id, &backdoor);
         }
 
         void
@@ -272,8 +278,19 @@ class CoherentXBar : public BaseXBar
       * broadcast needed for probes.  NULL denotes an absent filter. */
     SnoopFilter *snoopFilter;
 
+    /** Cycles of snoop response latency.*/
     const Cycles snoopResponseLatency;
+
+    /** Maximum number of outstading snoops sanity check*/
+    const unsigned int maxOutstandingSnoopCheck;
+
+    /** Maximum routing table size sanity check*/
+    const unsigned int maxRoutingTableSizeCheck;
+
+    /** Is this crossbar the point of coherency? **/
     const bool pointOfCoherency;
+
+    /** Is this crossbar the point of unification? **/
     const bool pointOfUnification;
 
     /**
@@ -314,7 +331,8 @@ class CoherentXBar : public BaseXBar
     void forwardTiming(PacketPtr pkt, PortID exclude_slave_port_id,
                        const std::vector<QueuedSlavePort*>& dests);
 
-    Tick recvAtomic(PacketPtr pkt, PortID slave_port_id);
+    Tick recvAtomicBackdoor(PacketPtr pkt, PortID slave_port_id,
+                            MemBackdoorPtr *backdoor=nullptr);
     Tick recvAtomicSnoop(PacketPtr pkt, PortID master_port_id);
 
     /**
