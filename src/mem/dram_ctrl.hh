@@ -1310,6 +1310,7 @@ class DRAMCtrl : public QoS::MemCtrl
     bool allRanksDrained() const;
     
     /*refresh count related parameters*/
+    bool enableBinAware;
     uint64_t pageCounts;
     uint64_t rowsPerBin;
     float pagesPerRow;

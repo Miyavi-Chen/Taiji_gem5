@@ -157,9 +157,13 @@ HybridMem::init()
         
         if (pool->isPoolUsed()) { mainMem_id.val = ch; }
         else {
-            cacheMem_id.val = ch; pool->setDRAM();
-            pool->setRankBinsPtr(
-                new HybridMem::BinsInRanks(ctrlptrs[cacheMem_id.val]));
+            cacheMem_id.val = ch;
+            if (ctrlptrs[cacheMem_id.val]->enableBinAware) {
+                pool->setDRAM();
+                pool->setRankBinsPtr(
+                    new HybridMem::BinsInRanks(ctrlptrs[cacheMem_id.val]));
+            }
+
             break;
         }
     }

@@ -142,6 +142,8 @@ class DRAMCtrl(QoSMemCtrl):
     # performance being lower when enabled
     enable_dram_powerdown = Param.Bool(False, "Enable powerdown states")
 
+    enable_bin_aware = Param.Bool(False, "Enable bin aware refresh")
+
     # For power modelling we need to know if the DRAM has a DLL or not
     dll = Param.Bool(True, "DRAM has DLL or not")
 
@@ -339,7 +341,7 @@ class DRAMCtrl(QoSMemCtrl):
 
     # Second voltage range defined by some DRAMs
     VDD2 = Param.Voltage("0V", "2nd Voltage Range")
-    
+
     verbose = Param.Bool(True, "Print information")
     deadlock_threshold = Param.Latency("1ms", "Deadlock threshold")
     cal_interval = Param.Latency("100ms", "Calculation interval")
@@ -588,7 +590,7 @@ class DDR4_2400_16x4(DRAMCtrl):
     # accommodate the larger bank count
     write_buffer_size = 64
     read_buffer_size = 64
-    
+
     write_low_thresh_perc = 0
 
     # 1200 MHz
@@ -690,16 +692,18 @@ class DDR4_2400_8x8(DDR4_2400_16x4):
     IDD4W = '123mA'
     IDD4R = '135mA'
     IDD3P1 = '37mA'
-    
+
 class DDR4_2400_8G_8x8(DDR4_2400_16x4):
     # Number of priorities in the system
     qos_priorities = 2
     # QoS scheduler policy: tags request with QoS priority value
     qos_policy = QoSFixedPriorityPolicy()
-    
+
+    enable_bin_aware = True
+
      # size of device
     device_size = '1GB'
-    
+
     ranks_per_channel = 1
     # 8x8 configuration, 8 devices each with an 8-bit interface
     device_bus_width = 8
@@ -714,7 +718,7 @@ class DDR4_2400_8G_8x8(DDR4_2400_16x4):
     tRRD_L = '4.9ns'
 
     tXAW = '21ns'
-    
+
     tRFC = '350ns'
 
     # Current values from datasheet
@@ -723,7 +727,7 @@ class DDR4_2400_8G_8x8(DDR4_2400_16x4):
     IDD4W = '123mA'
     IDD4R = '135mA'
     IDD3P1 = '37mA'
-    
+
     write_low_thresh_perc = 0
     # page_policy = 'close'
     max_accesses_per_row = 16
@@ -739,6 +743,8 @@ class DDR4_2400_4x16(DDR4_2400_16x4):
     # QoS scheduler policy: tags request with QoS priority value
     qos_policy = QoSFixedPriorityPolicy()
     # qos_policy.setMasterPriority("hybrid_mem", 1)
+
+    enable_bin_aware = True
     # 4x16 configuration, 4 devices each with an 16-bit interface
     device_bus_width = 16
 
@@ -767,7 +773,7 @@ class DDR4_2400_4x16(DDR4_2400_16x4):
     tRRD_L = '6.4ns';
 
     tXAW = '30ns'
-    
+
     tRFC = '350ns'
 
     # Current values from datasheet
@@ -1289,7 +1295,7 @@ class PCM_LPDDR2_400_8x8(DRAMCtrl):
     ranks_per_channel = 1
 
     banks_per_rank = 2
-    
+
     write_buffer_size = 128
     read_buffer_size = 64
 
@@ -1385,7 +1391,7 @@ class PCM_LPDDR2_4G_400_16x4(PCM_LPDDR2_400_8x8):
     ranks_per_channel = 1
 
     banks_per_rank = 8
-    
+
     write_buffer_size = 128
     read_buffer_size = 64
     write_low_thresh_perc = 0
@@ -1399,10 +1405,10 @@ class PCM_LPDDR2_8G_400_16x4(PCM_LPDDR2_400_8x8):
     # qos_policy.setMasterPriority("hybrid_mem", 1)
 
 
-    
+
     # size of device
     device_size = '1024MB'
-    
+
     tRCD = '28ns'
     tWP = '150ns'
     tCL = '15ns'
@@ -1417,21 +1423,21 @@ class PCM_LPDDR2_8G_400_16x4(PCM_LPDDR2_400_8x8):
     ranks_per_channel = 1
 
     banks_per_rank = 16
-    
+
     write_buffer_size = 64
     read_buffer_size = 64
     write_low_thresh_perc = 0
     # page_policy='close'
     max_accesses_per_row = 2
-    
+
     IDD0 = '38.88mA'
     IDD4R = '68.33mA'
     IDD4W = '443.33mA'
     IDD3N = '25mA'
-    
+
 class PCM_DDR2_16G_400_16x4(PCM_LPDDR2_8G_400_16x4):
     ranks_per_channel = 2
-    
+
 class PCM_DDR2_32G_400_16x4(PCM_LPDDR2_8G_400_16x4):
     ranks_per_channel = 2
 class PCM_LPDDR2_32G_400_16x4(PCM_LPDDR2_400_8x8):
@@ -1448,7 +1454,7 @@ class PCM_LPDDR2_32G_400_16x4(PCM_LPDDR2_400_8x8):
     ranks_per_channel = 2
 
     banks_per_rank = 16
-    
+
     write_buffer_size = 128
     read_buffer_size = 64
     write_low_thresh_perc = 0

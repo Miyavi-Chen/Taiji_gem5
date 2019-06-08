@@ -120,7 +120,8 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     enableDRAMPowerdown(p->enable_dram_powerdown),
     rdReqDeadlockEvent([this]{ rdReqDeadlock(); }, name()),
     wrReqDeadlockEvent([this]{ wrReqDeadlock(); }, name()),
-    calculateWaitingEvent([this]{ calculateWaiting(); }, name())
+    calculateWaitingEvent([this]{ calculateWaiting(); }, name()),
+    enableBinAware(p->enable_bin_aware)
 {
     // sanity check the ranks since we rely on bit slicing for the
     // address decoding
@@ -237,18 +238,20 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
         panic("Unknown memory cell scheme!");
     }
 
-    pageCounts = capacity / system()->getPageBytes();
-    rowsPerBin = rowsPerBank / TOTALBINS;
-    pagesPerRow = rowBufferSize / system()->getPageBytes();
-    pagesPerBin = rowsPerBin * pagesPerRow;
+    if (enableBinAware) {
+        pageCounts = capacity / system()->getPageBytes();
+        rowsPerBin = rowsPerBank / TOTALBINS;
+        pagesPerRow = rowBufferSize / system()->getPageBytes();
+        pagesPerBin = rowsPerBin * pagesPerRow;
 
-    if (binsNeedREF == nullptr) {
-        binsNeedREF = new std::vector<std::vector<int> *>();
+        if (binsNeedREF == nullptr) {
+            binsNeedREF = new std::vector<std::vector<int> *>();
 
-        for (int r = 0; r < ranksPerChannel; ++r) {
-            binsNeedREF->push_back(new std::vector<int>());
-            for (int i = 0; i < TOTALBINS; ++i) {
-                binsNeedREF->at(r)->push_back(0);
+            for (int r = 0; r < ranksPerChannel; ++r) {
+                binsNeedREF->push_back(new std::vector<int>());
+                for (int i = 0; i < TOTALBINS; ++i) {
+                    binsNeedREF->at(r)->push_back(0);
+                }
             }
         }
     }
@@ -2400,7 +2403,7 @@ void
 DRAMCtrl::Rank::processRefreshEvent()
 {
     //skip refresh if count of bin refreshed this time is 0
-    if(!memory.binsNeedREF->at(rank)->at(nextREFBin)) {
+    if(memory.enableBinAware && !memory.binsNeedREF->at(rank)->at(nextREFBin)) {
         tmpREFState = refreshState;
         refreshState = REF_PASS;
     }
@@ -2556,6 +2559,8 @@ DRAMCtrl::Rank::processRefreshEvent()
 
         // Update for next refresh
         refreshDueAt += memory.tREFI;
+        if (memory.enableBinAware)
+            std::cout<<"Ref at Bin: "<<nextREFBin<<"\n";
 
         // make sure we did not wait so long that we cannot make up
         // for it
@@ -2617,6 +2622,8 @@ DRAMCtrl::Rank::processRefreshEvent()
         // Compensate for the delay in actually performing the refresh
         // when scheduling the next one
         schedule(refreshEvent, refreshDueAt - memory.tRP);
+        if (memory.enableBinAware)
+            nextREFBin = (nextREFBin + 1) % TOTALBINS;
 
         DPRINTF(DRAMState, "Refresh done at %llu and next refresh"
                 " at %llu\n", curTick(), refreshDueAt);
@@ -2825,8 +2832,12 @@ DRAMCtrl::Rank::processPowerEvent()
             // Schedule a refresh which kicks things back into action
             // when it finishes
             refreshState = REF_SREF_EXIT;
-            nextREFBin = nextREFBin + (duration + memory.tXS) / memory.tREFI;
-            nextREFBin %= TOTALBINS;
+            if (memory.enableBinAware) {
+                nextREFBin = nextREFBin +
+                            (duration + memory.tXS) / memory.tREFI;
+                nextREFBin %= TOTALBINS;
+            }
+
             schedule(refreshEvent, curTick() + memory.tXS);
         } else {
             // if we have a pending refresh, and are now moving to
