@@ -52,7 +52,7 @@
  * currently not modified.
  */
 
-class HomeAgent : public MemObject
+class HomeAgent : public ClockedObject
 {
 
   public:

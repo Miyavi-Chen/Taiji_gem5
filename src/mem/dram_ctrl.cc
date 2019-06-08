@@ -2411,7 +2411,7 @@ DRAMCtrl::Rank::processRefreshEvent()
     if(refreshState == REF_PASS) {
         refreshState = tmpREFState;
         tmpREFState = REF_IDLE;
-        std::cout<<"Skip Ref at Bin: "<<nextREFBin<<"\n";
+        // std::cout<<"Skip Ref at Bin: "<<nextREFBin<<"\n";
 
         // Update for next refresh
         refreshDueAt += memory.tREFI;

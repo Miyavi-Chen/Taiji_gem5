@@ -105,7 +105,7 @@ class DRAMCtrl : public QoS::MemCtrl
 {
   friend class HybridMem;
   private:
-  
+
     HybridMem * HybridMemptr;
     // For now, make use of a queued slave port to avoid dealing with
     // flow control for the responses being sent back
@@ -202,7 +202,7 @@ class DRAMCtrl : public QoS::MemCtrl
         uint32_t bytesAccessed;
 
         RowState rowState;
-        
+
         Tick Total_Tick_between_diff_rows;
         uint32_t count_of_switch_rows;
         Tick pre_switch_tick;
@@ -400,7 +400,7 @@ class DRAMCtrl : public QoS::MemCtrl
          * current refresh state
          */
         RefreshState refreshState;
-        
+
         /**
          * tmp refresh state
          */
@@ -558,7 +558,7 @@ class DRAMCtrl : public QoS::MemCtrl
          * Reset stats on a stats event
          */
         void resetStats();
-        
+
         /**
          * Function to update Power Stats
          */
@@ -679,7 +679,7 @@ class DRAMCtrl : public QoS::MemCtrl
 
         /** MasterID associated with the packet */
         const MasterID _masterId;
-        
+
         const uint64_t QLen;
 
         const bool physAddrValid;
@@ -1136,7 +1136,7 @@ class DRAMCtrl : public QoS::MemCtrl
     Stats::Scalar writeBurstsPI;
     Stats::Scalar bytesReadDRAMPI;
     Stats::Scalar bytesWrittenPI;
-    
+
 
     // per-master bytes read and written to memory
     Stats::Vector masterReadBytes;
@@ -1213,10 +1213,10 @@ class DRAMCtrl : public QoS::MemCtrl
 
     /** The time when stats were last reset used to calculate average power */
     Tick lastStatsResetTick;
-    
+
     MasterID HybridMemID;
     MasterID DMAID;
-    
+
     uint64_t lastRdQLen;
     uint64_t lastWrQLen;
     Tick lastRdQLenTick;
@@ -1237,6 +1237,9 @@ class DRAMCtrl : public QoS::MemCtrl
 
     size_t wrReqWaitingTimes;
 
+     /** Enable or disable DRAM powerdown states. */
+    bool enableDRAMPowerdown;
+
     EventFunctionWrapper rdReqDeadlockEvent;
 
     EventFunctionWrapper wrReqDeadlockEvent;
@@ -1250,10 +1253,7 @@ class DRAMCtrl : public QoS::MemCtrl
     void calculateWaiting();
 
     void resetWaitingCounter();
-    
 
-    /** Enable or disable DRAM powerdown states. */
-    bool enableDRAMPowerdown;
 
     /**
      * Upstream caches need this packet until true is returned, so
@@ -1308,7 +1308,7 @@ class DRAMCtrl : public QoS::MemCtrl
      *
      */
     bool allRanksDrained() const;
-    
+
     /*refresh count related parameters*/
     bool enableBinAware;
     uint64_t pageCounts;
@@ -1323,7 +1323,7 @@ class DRAMCtrl : public QoS::MemCtrl
     void resetPerInterval();
     void updateCtrlRefTable(size_t rank, size_t binNum, bool isValid);
     Tick avgTimeSwitchRow();
-    
+
 
   protected:
 

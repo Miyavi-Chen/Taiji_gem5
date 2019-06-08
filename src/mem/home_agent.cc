@@ -40,7 +40,7 @@
 #include "mem/home_agent.hh"
 
 HomeAgent::HomeAgent(const HomeAgentParams* p)
-    : MemObject(p),
+    : ClockedObject(p),
       slavePort(name() + ".slave", *this),
       masterPort(name() + ".master", *this),
       physRanges(p->phys_ranges),
@@ -88,7 +88,7 @@ HomeAgent::getPort(const std::string &if_name, PortID idx)
         // the slave port index translates directly to the vector position
         return slavePort;
     } else {
-        return MemObject::getPort(if_name, idx);
+        return ClockedObject::getPort(if_name, idx);
     }
 }
 

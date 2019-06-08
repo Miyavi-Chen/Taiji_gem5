@@ -56,7 +56,7 @@
 #include "debug/ZeroXBar.hh"
 
 ZeroXBar::ZeroXBar(const ZeroXBarParams *p)
-    : MemObject(p),
+    : ClockedObject(p),
       gotAddrRanges(p->port_master_connection_count, false),
       gotAllAddrRanges(false)
 {}
@@ -85,7 +85,7 @@ ZeroXBar::getPort(const std::string &if_name, PortID idx)
         // the slave port index translates directly to the vector position
         return *slavePorts[idx];
     } else {
-        return MemObject::getPort(if_name, idx);
+        return ClockedObject::getPort(if_name, idx);
     }
 }
 

@@ -40,7 +40,7 @@
 #include "mem/coward_addr_mapper.hh"
 
 CowardAddrMapper::CowardAddrMapper(const CowardAddrMapperParams* p)
-    : MemObject(p),
+    : ClockedObject(p),
       slavePort(name() + ".slave", *this),
       masterPort(name() + ".master", *this),
       originalRanges(p->original_ranges),
@@ -88,7 +88,7 @@ CowardAddrMapper::getPort(const std::string &if_name, PortID idx)
         // the slave port index translates directly to the vector position
         return slavePort;
     } else {
-        return MemObject::getPort(if_name, idx);
+        return ClockedObject::getPort(if_name, idx);
     }
 }
 

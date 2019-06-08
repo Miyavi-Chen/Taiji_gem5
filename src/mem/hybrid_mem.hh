@@ -44,7 +44,7 @@
 #include <vector>
 #include <map>
 #include <iostream>
-#include <utility> 
+#include <utility>
 
 #include "mem/dram_ctrl.hh"
 #include "mem/mem_object.hh"
@@ -60,7 +60,7 @@
  * currently not modified.
  */
 class DRAMCtrl;
-class HybridMem : public MemObject
+class HybridMem : public ClockedObject
 {
   friend class DRAMCtrl;
   public:
@@ -94,13 +94,13 @@ class HybridMem : public MemObject
     HybridMem(const HybridMemParams* params);
 
     virtual void init() override;
-    
+
     virtual void startup() override;
-    
+
     virtual void regStats() override;
-    
+
     void resetStats();
-    
+
     class HybridmemResetCallback : public Callback
     {
       private:
@@ -116,7 +116,7 @@ class HybridMem : public MemObject
                   PortID idx=InvalidPortID) override;
 
   protected:
-        
+
     class BinEntry
     {
       public:
@@ -127,10 +127,10 @@ class HybridMem : public MemObject
               allocatedPagesPerBin.push_back(0);
           }
         }
-        
+
         bool needRefresh () {return needRef;}
         bool isFull () {return full;}
-        
+
         int firstFreeFrame ()
         {
           assert(!full);
@@ -139,7 +139,7 @@ class HybridMem : public MemObject
           }
           return -1;
         }
-        
+
         void binUpdate ()
         {
           full = allocatedPagesPerBin[0];
@@ -149,26 +149,26 @@ class HybridMem : public MemObject
             needRef |= allocatedPagesPerBin[i];
           }
         }
-        
+
         void binSet (int num)
         {
           allocatedPagesPerBin[num] = true;
           binUpdate();
         }
-        
+
         void binReset (int num)
         {
           allocatedPagesPerBin[num] = false;
           binUpdate();
         }
-        
+
       private:
         bool needRef;
         bool full;
         uint64_t pagesPerBin;
         std::vector<bool> allocatedPagesPerBin;
     };
-    
+
     class BinsOfRank//TBD
     {
       public:
@@ -192,27 +192,30 @@ class HybridMem : public MemObject
               return static_cast<size_t>(idx + i * pagesPerBin);
             }
           }
-          
+
           full = true;
           return std::numeric_limits<size_t>::max();
         }
-        
+
         bool isFull() { return full;}
-        
+
         bool needRefresh (size_t binNum)
         {
           return bins[binNum].needRefresh();
         }
-        
+
         void allocFrame (size_t binNum, size_t idx)
         {
           bins[binNum].binSet(idx);
         }
-        
+
         void releaseFrame (size_t binNum, size_t idx)
         {
           bins[binNum].binReset(idx);
-          if (nextFreeBin > binNum) { nextFreeBin = binNum;}
+          if (nextFreeBin > binNum) {
+            std::cout<<"Free bin change from"<<nextFreeBin<<" "<<binNum<<"\n";
+            nextFreeBin = binNum;
+          }
         }
 
       private:
@@ -221,7 +224,7 @@ class HybridMem : public MemObject
         size_t nextFreeBin;
         uint64_t pagesPerBin;
     };
-    
+
     class BinsInRanks
     {
       public:
@@ -235,11 +238,11 @@ class HybridMem : public MemObject
             binsInRanks.push_back(BinsOfRank(pagesPerBin));
           }
         }
-        
+
         size_t getFreeFrame ()
         {
           size_t pageNumOfRank = {std::numeric_limits<size_t>::max()};
-          for (int cnt=0; cnt < ranksPerChannel; 
+          for (int cnt=0; cnt < ranksPerChannel;
                 ++cnt, nextRank = (nextRank+1)% ranksPerChannel) {
             if (!binsInRanks[nextRank].isFull()) {
               pageNumOfRank = binsInRanks[nextRank].getFreeFrame();
@@ -249,11 +252,11 @@ class HybridMem : public MemObject
               }
             }
           }
-          
+
           nextRank = (nextRank + 1) % ranksPerChannel;
           return pageNumOfRank;
         }
-        
+
         void allocFrame (size_t frameNum)
         {
           size_t pageNumOfRank = frameNum / ranksPerChannel;
@@ -265,7 +268,7 @@ class HybridMem : public MemObject
           std::cout<<"BinsOfRank alloc bin "<<binNum<<" ";
           std::cout<<"alloc idx "<<idx<<"\n";
         }
-        
+
         void releaseFrame (size_t frameNum)
         {
           size_t pageNumOfRank = frameNum / ranksPerChannel;
@@ -277,7 +280,7 @@ class HybridMem : public MemObject
           std::cout<<"BinsOfRank free bin "<<binNum<<" ";
           std::cout<<"free idx "<<idx<<"\n";
         }
-        
+
         void updateCtrlRefTable (size_t rank, size_t binNum)
         {
           bool isValid = false;
@@ -286,7 +289,7 @@ class HybridMem : public MemObject
           } else {
             //NA
           }
-          ctrlptrs->updateCtrlRefTable(rank, binNum, isValid); 
+          ctrlptrs->updateCtrlRefTable(rank, binNum, isValid);
         }
 
       private:
@@ -296,7 +299,7 @@ class HybridMem : public MemObject
         const uint64_t pagesPerBin;
         const uint64_t rowsPerBin;
         uint32_t nextRank;
-        
+
     };
 
 
@@ -357,7 +360,7 @@ class HybridMem : public MemObject
             poolEmpty(false), poolUsed(false), nextTimeFrameIdx(0),
             freeFrameSize(frames.size()), isDram(false), BinsInRanksPtr(nullptr)
         { }
-        
+
         void setDRAM () {isDram = true;}
         void setRankBinsPtr (BinsInRanks *_BinsInRanksPtr) {
           BinsInRanksPtr = _BinsInRanksPtr;
@@ -423,18 +426,18 @@ class HybridMem : public MemObject
           assert(i < frames.size());
           return frames[i].getOwner();
         }
-        
+
         void setPoolUsed()
         {
           assert(poolUsed == false);
           poolUsed = true;
         }
-        
+
         bool isPoolUsed()
         {
           return poolUsed;
         }
-        
+
         size_t getFreeFrameSize() {
           return freeFrameSize;
         }
@@ -579,7 +582,7 @@ class HybridMem : public MemObject
             masterWaitingTick(std::numeric_limits<Tick>::max())
         {
           pageAddr.val = std::numeric_limits<Addr>::max();
-          
+
           readcount = writecount = migrationCount = 0;
           isDirty = isInDram = isPageCache = false;
           migrationIntervalTotal = lastMigrationInterval = 0;
@@ -588,13 +591,13 @@ class HybridMem : public MemObject
           readreqPerInterval = writereqPerInterval = 0;
           lastAccessInterval = 0;
         }
-        
+
         int readcount;
         int writecount;
         bool isDirty;
         bool isInDram;
         bool isPageCache;
-        
+
         //observation
         int migrationCount;
         int migrationIntervalTotal;
@@ -612,7 +615,7 @@ class HybridMem : public MemObject
 
         size_t readreqPerInterval;
         size_t writereqPerInterval;
-        
+
         uint64_t lastAccessInterval;
 
         void setPageAddr(struct PageAddr _addr) {
@@ -689,7 +692,7 @@ class HybridMem : public MemObject
             getValidChannelIdx(_idxSet);
           }
         }
-        
+
         void getCanLaunchChannelIdxFun(std::vector<struct ChannelIdx> *_idxSet)
         {
           _idxSet->clear();
@@ -768,7 +771,7 @@ class HybridMem : public MemObject
           assert(_idx.val < channels.size());
           return channels[_idx.val].getPossession();
         }
-        
+
         void resetPageCounters()
         {
           if (isPageCache) {readcount = -64; writecount = -64;}
@@ -788,7 +791,7 @@ class HybridMem : public MemObject
 
           readreqPerInterval = 0;
           writereqPerInterval = 0;
-          
+
           lastAccessTick = 0;
 
           readreqPerInterval = 0;
@@ -830,7 +833,7 @@ class HybridMem : public MemObject
           assert(i < pages.size());
           return &(pages[i]);
         }
-        
+
         void resetPageCounters()
         {
           for (size_t i = 0; i < pages.size(); ++i) {
@@ -870,7 +873,7 @@ class HybridMem : public MemObject
           }
           assert(0);
         }
-        
+
         void resetPageCounters()
         {
           for (size_t i = 0; i < ranges.size(); ++i) {
@@ -1170,7 +1173,7 @@ class HybridMem : public MemObject
      * remapped to. See the description for memRanges above
      */
     std::vector<AddrRange> channelRanges;
-    
+
     class LRU
     {
       public:
@@ -1199,11 +1202,11 @@ class HybridMem : public MemObject
         void getAllHostPages(std::vector<Addr>&);
 
         void reset();
-        
+
         bool isEmpty();
 
     };
-    
+
     class LFU
     {
       public:
@@ -1219,7 +1222,7 @@ class HybridMem : public MemObject
             lfuNodes[i].pre = -1;
           }
         }
-        
+
         struct node {
             Addr hostAddr;
             int DValue;
@@ -1229,13 +1232,13 @@ class HybridMem : public MemObject
 
         void order(int idx) {
           int cur = tail;
-          
+
           if (head == -1 && tail == -1) {
             head = tail = idx;
             checkLFUErr();
             return;
           }
-          
+
           while (cur != -1) {
             if (lfuNodes[cur].DValue > lfuNodes[idx].DValue) {
               lfuNodes[idx].pre = cur;
@@ -1245,15 +1248,15 @@ class HybridMem : public MemObject
               } else {
                 lfuNodes[lfuNodes[cur].next].pre = idx;
               }
-              lfuNodes[cur].next = idx;            
+              lfuNodes[cur].next = idx;
               checkLFUErr();
               return;
-              
+
             } else {
               cur = lfuNodes[cur].pre;
             }
           }
-          
+
           if (cur == -1) {
             lfuNodes[head].pre = idx;
             lfuNodes[idx].next = head;
@@ -1262,13 +1265,13 @@ class HybridMem : public MemObject
           }
           checkLFUErr();
         }
-          
-        void increment(int i, int Dvalue) 
-        { 
+
+        void increment(int i, int Dvalue)
+        {
           lfuNodes[i].DValue += Dvalue;
           assert(Dvalue > 0);
           if (size == 1 || i == head) {
-            checkLFUErr();   
+            checkLFUErr();
             return;
           } else if (i == tail) {
             int pre = lfuNodes[i].pre;
@@ -1284,23 +1287,23 @@ class HybridMem : public MemObject
             lfuNodes[i].pre = lfuNodes[i].next = -1;
             order(i);
           }
-          
-        } 
-          
-        struct PageAddr insert(Addr addr, int Dvalue) 
+
+        }
+
+        struct PageAddr insert(Addr addr, int Dvalue)
         {
           struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
           if (size == maxSize) {
             evictPage.val = lfuNodes[tail].hostAddr;
             // std::cout << lfuNodes[tail].hostAddr <<"/"<< lfuNodes[tail].DValue << " removed.\n";
-            
+
             int tmpIdx = tail;
             int pre = lfuNodes[tmpIdx].pre;
             lfuNodes[pre].next = -1;
             lfuNodes[tmpIdx].pre = -1;
             lfuNodes[tmpIdx].next = -1;
             tail = pre;
-            
+
             int n = mapIndex.erase(lfuNodes[tmpIdx].hostAddr);
             if (n != 1) {
                 printf("LFU error!1\n");
@@ -1311,7 +1314,7 @@ class HybridMem : public MemObject
             mapIndex.insert(std::make_pair(addr, tmpIdx));
             order(tmpIdx);
             return evictPage;
-             
+
           }
           ++size;
           for (int i = 0; i < maxSize; i++) {
@@ -1324,22 +1327,22 @@ class HybridMem : public MemObject
               break;
             }
           }
- 
+
           // std::cout << "cache block " << addr << " inserted.\n";
-          return evictPage; 
-        } 
-          
-        virtual struct PageAddr refer(Addr addr, int Dvalue) 
+          return evictPage;
+        }
+
+        virtual struct PageAddr refer(Addr addr, int Dvalue)
         {
           struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
-          if (mapIndex.find(addr) == mapIndex.end()) 
+          if (mapIndex.find(addr) == mapIndex.end())
             evictPage = insert(addr, Dvalue);
           else
             increment(mapIndex[addr], Dvalue);
-          
+
           return evictPage;
         }
-            
+
         virtual void reset()
         {
           head = -1;
@@ -1363,14 +1366,14 @@ class HybridMem : public MemObject
         }
         bool isEmpty() {return size == 0;}
         int capacity() {return size;}
-        void printLFU() 
+        void printLFU()
         {
           for (int i = 0, cur = head; i < size; ++i, cur = lfuNodes[cur].next) {
             std::cout<<lfuNodes[cur].DValue<<", ";
           }
           std::cout<<"\n";
         }
-        
+
       public:
         std::map<Addr, int> mapIndex;
         const int maxSize;
@@ -1380,16 +1383,16 @@ class HybridMem : public MemObject
         node *lfuNodes;
 
     };
-    
+
     class LFUDA : public LFU
     {
       public:
         LFUDA(int _cacheMaxSize, int _threshold, int _maxHits)
         : LFU(_cacheMaxSize), threshold(_threshold), maxHits(_maxHits)
         {
-          
+
         }
-        
+
         struct PageAddr refer(Addr addr, int Dvalue) override
         {
           struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
@@ -1409,39 +1412,39 @@ class HybridMem : public MemObject
             if (lfuNodes[mapIndex[addr]].DValue >= maxHits) {
               // std::cout<<"Reach Max Hits\n";
               for (auto & iter : mapIndex) {
-                lfuNodes[iter.second].DValue = 
+                lfuNodes[iter.second].DValue =
                   lfuNodes[iter.second].DValue - maxHits < 0 ?
                   0 : lfuNodes[iter.second].DValue - maxHits;
-                
+
               }
-              
+
               threshold = 0;
             }
           }
-            
+
           return evictPage;
         }
-        
+
         virtual void reset() override
         {
           LFU::reset();
           threshold = 0;
         }
-      
+
       private:
         int threshold;
         const int maxHits;
     };
-    
+
     LFUDA DramLFUDA;
     LFUDA PcmLFUDA;
     // LFU DramLFU;
     // LFU PcmLFU;
-    
+
     std::unordered_set<Addr> mapRef;
     LRU rankingDramLRU;
     LRU rankingPcmLRU;
-    
+
     class SortHostPage
     {
       public:
@@ -1495,7 +1498,7 @@ class HybridMem : public MemObject
     std::deque<class MigrationTask *> migrationTasks;
 
     std::map<RequestPtr, class MigrationTask *> migrationReq;
-    
+
     std::map<Addr, int> migrationPages;
     std::map<Addr, int> migrationPagesPI;
 
@@ -1547,7 +1550,7 @@ class HybridMem : public MemObject
     Addr toChannelAddr(class Page *page, struct ChannelIdx idx, PacketPtr pkt);
 
     struct ChannelIdx selectChannelIdx(class Page *page);
-    
+
     struct ChannelIdx selectChannelIdxFun(class Page *page);
 
     struct ChannelIdx toChannelIdx(size_t i) const;
@@ -1557,13 +1560,13 @@ class HybridMem : public MemObject
     struct PhysAddr toPhysAddr(class Page *page) const;
 
     struct PageAddr toPageAddr(Addr addr) const;
-    
+
     struct PageAddr toMemAddr(Addr addr) const;
 
     struct PageAddr toPageAddr(PacketPtr pkt) const;
-    
+
     struct FrameAddr toFrameAddrMemSide(Addr addr) const;
-    
+
     struct PageAddr toPageAddrMemSide(Addr addr) const;
 
     struct FrameAddr toFrameAddr(Addr addr) const;
@@ -1576,60 +1579,60 @@ class HybridMem : public MemObject
     bool canBeDrained();
 
     DrainState drain() override;
-    
+
     void CountScoreinc(struct PageAddr, bool isRead, bool hit, uint64_t qlen);
-    
+
     void ReadCountinc(class Page *page, uint64_t qlen);
-    
+
     void WriteCountinc(class Page *page, uint64_t qlen);
-    
+
     size_t addScoreToPage(class Page *page, size_t score);
-    
+
     void getPageRanking(std::vector<Addr>& v);
-    
+
     static bool PCMtoDRAMsort(const SortHostPage& a, const SortHostPage& b);
     static bool DRAMtoPCMsort(const SortHostPage& a, const SortHostPage& b);
-    
+
     void getMigrationPageNum(size_t& , double DRAM_latency, double PCM_latency);
     void genMigrationTasks(size_t &migrationPageNum, bool pcm2dram);
     void genDramEvictedMigrationTasks(size_t &halfMigrationPageNum);
     void genPcmMigrationTasks(size_t &migrationPageNum);
     void genDramMigrationTasks(size_t &migrationPageNum);
-    
+
     void predicRowHitOrMiss(class Page * page);
-    
+
     void updateStatisticInfo();
     void updateBWInfo();
     void resetPerInterval();
     void resetPages();
-    
+
     void rightRatioCheck();
-        
+
     void processWarmUpEvent();
     EventFunctionWrapper warmUpEvent;
-    
+
     void processRegularBalancedEvent();
     EventFunctionWrapper regularBalancedEvent;
     bool hasWarmedUp;
-    
+
     std::vector<DRAMCtrl *> ctrlptrs;
-    
+
     MasterID dmaDeviceId;
     class SimObject *dmaDevicePtr;
-    
+
     MasterID dirCtrlId;
     class AbstractController *dirCtrlPtr;
-    
+
     Tick timeInterval;
     Tick timeWarmup;
-    
+
     uint64_t totalInterval;
     uint64_t skipInterval;
-    
-    
+
+
     struct ChannelIdx mainMem_id;
     struct ChannelIdx cacheMem_id;
-    
+
     double avgMemLatencyPCM;
     double avgMemLatencyDRAM;
     double avgRdQLenPCM;
@@ -1640,40 +1643,40 @@ class HybridMem : public MemObject
     double avgBWDRAM;
     double avgWrBWPCM;
     double avgWrBWDRAM;
-    
+
     Tick avgTimeSwitchRowPCM;
     Tick avgTimeSwitchRowDRAM;
-    
+
     uint64_t pcmScore;
     uint64_t dramScore;
 
     const int DValueMax;
     const int infDramMax;
     const int infPcmMax;
-    
+
     uint32_t refPagePerIntervalnum;
     uint32_t refPageinDramPerIntervalnum;
     uint32_t refPageinPcmPerIntervalnum;
-    
+
     uint64_t reqInDramCount;
     uint64_t reqInPcmCount;
     uint64_t reqInDramCountPI;
-    
-    
+
+
     // All statistics that the model needs to capture
     Stats::Scalar intervalCount;
     Stats::Scalar balanceCount;
     Stats::Scalar unbalanceCount;
     Stats::Scalar rightRatioSum;
-    
+
     Stats::Formula rightRatio;
-    
+
     Tick MigrationTimeStartAt;
     Stats::Scalar totMemMigrationTime;
-    
+
     size_t pendingReqsPriorMigration;
     Stats::Scalar totBlockedReqsForMigration;
-    
+
     Stats::Scalar lastWarmupAt;
     Stats::Scalar badMigrationPageCount;
 };

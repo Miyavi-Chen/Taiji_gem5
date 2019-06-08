@@ -42,7 +42,7 @@
 #include "sim/system.hh"
 
 FlexMem::FlexMem(const FlexMemParams* p)
-    : MemObject(p),
+    : ClockedObject(p),
       slavePort(name() + ".slave", *this),
       masterPort(name() + ".master", *this),
       memRanges(p->mem_ranges),
@@ -177,7 +177,7 @@ FlexMem::getPort(const std::string &if_name, PortID idx)
         // the slave port index translates directly to the vector position
         return slavePort;
     } else {
-        return MemObject::getPort(if_name, idx);
+        return ClockedObject::getPort(if_name, idx);
     }
 }
 

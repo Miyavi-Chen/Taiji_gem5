@@ -52,7 +52,7 @@
  * currently not modified.
  */
 
-class FlexMem : public MemObject
+class FlexMem : public ClockedObject
 {
 
   public:

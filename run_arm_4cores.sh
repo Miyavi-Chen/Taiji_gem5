@@ -17,25 +17,25 @@ SCRIPT=./.vscode/cpu2017.sh
 
 
 
-CPU_TYPE=AtomicSimpleCPU
+# CPU_TYPE=AtomicSimpleCPU
 
-build/ARM/gem5.opt \
-configs/example/fs.py \
---arm-iset="aarch64" \
---machine-type="VExpress_GEM5_V1" \
---dtb=$M5_PATH/binaries/armv8_gem5_v1_4cpu.dtb \
---checkpoint-dir=${CHECKPOINT_DIR} \
---kernel=vmlinux-4.15.0-master-gem5 \
---disk-image=hdd0531.img \
---num-cpus=4 --cpu-clock=5.0GHz \
---cpu-type=${CPU_TYPE} --restore-with-cpu=${CPU_TYPE} \
---caches --l1d_size=32kB --l1i_size=32kB \
---l2cache --l2_size=2MB --num-l2caches=1 \
---ruby --mem-size=16GB --mem-type=MemSubsystem \
---channel-sizes='16GB;8GB' \
---channel-types='PCM_DDR2_16G_400_16x4;DDR4_2400_8G_8x8' \
---balance-interval=0us --time-warmup=100us 
-exit 0
+# build/ARM/gem5.opt \
+# configs/example/fs.py \
+# --arm-iset="aarch64" \
+# --machine-type="VExpress_GEM5_V1" \
+# --dtb=$M5_PATH/binaries/armv8_gem5_v1_4cpu.dtb \
+# --checkpoint-dir=${CHECKPOINT_DIR} \
+# --kernel=vmlinux-4.15.0-master-gem5 \
+# --disk-image=hdd0531.img \
+# --num-cpus=4 --cpu-clock=5.0GHz \
+# --cpu-type=${CPU_TYPE} --restore-with-cpu=${CPU_TYPE} \
+# --caches --l1d_size=32kB --l1i_size=32kB \
+# --l2cache --l2_size=2MB --num-l2caches=1 \
+# --ruby --mem-size=16GB --mem-type=MemSubsystem \
+# --channel-sizes='16GB;8GB' \
+# --channel-types='PCM_DDR2_16G_400_16x4;DDR4_2400_8G_8x8' \
+# --balance-interval=0us --time-warmup=100us
+# exit 0
 
 
 # hammer
@@ -61,7 +61,8 @@ configs/example/fs.py \
 --channel-sizes='16GB;8GB' \
 --channel-types='PCM_DDR2_16G_400_16x4;DDR4_2400_8G_8x8' \
 --balance-interval=200us --time-warmup=100ms \
---maxinsts=${MAXINSTS}
+--maxinsts=${MAXINSTS} \
+| tee m5out/log.out.run.sh.log
 exit 0
 
 

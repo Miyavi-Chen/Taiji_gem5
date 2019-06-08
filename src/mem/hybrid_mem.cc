@@ -51,7 +51,7 @@ using namespace std;
 using namespace Data;
 
 HybridMem::HybridMem(const HybridMemParams* p)
-    : MemObject(p),
+    : ClockedObject(p),
       slavePort(name() + ".slave", *this),
       masterPort(name() + ".master", *this),
       physRanges(p->phys_ranges),
@@ -103,7 +103,7 @@ HybridMem::HybridMem(const HybridMemParams* p)
     assert(totalSizeOf(memRanges));
     assert(totalSizeOf(channelRanges));
     assert(totalSizeOf(memRanges) <= totalSizeOf(channelRanges));
-    
+
     dmaDevicePtr = nullptr;
     dmaDeviceId = 0;
 }
@@ -154,7 +154,7 @@ HybridMem::init()
     for (size_t ch = 0; ch < channelRanges.size(); ++ch) {
         struct ChannelIdx channel_idx = toChannelIdx(ch);
         class FramePool *pool = pools.poolOf(channel_idx);
-        
+
         if (pool->isPoolUsed()) { mainMem_id.val = ch; }
         else {
             cacheMem_id.val = ch;
@@ -171,12 +171,12 @@ HybridMem::init()
     ctrlptrs[mainMem_id.val]->HybridMemID = masterId;
     ctrlptrs[cacheMem_id.val]->timeInterval = double(timeInterval)/1000000000000;
     ctrlptrs[mainMem_id.val]->timeInterval = double(timeInterval)/1000000000000;
-    
+
     dmaDevicePtr = SimObject::find ("system.pci_ide");
     dmaDeviceId = sys->lookupMasterId(dmaDevicePtr);
     ctrlptrs[cacheMem_id.val]->DMAID = dmaDeviceId;
     ctrlptrs[mainMem_id.val]->DMAID = dmaDeviceId;
-    
+
     dirCtrlPtr = reinterpret_cast<AbstractController *>(SimObject::find ("system.ruby.dir_cntrl0"));
     // dirCtrlId = sys->lookupMasterId(dirCtrlPtr);
 }
@@ -195,7 +195,7 @@ HybridMem::processWarmUpEvent()
 {
 
     std::cout<<" HybridMem Warm up at"<<curTick()<<std::endl;
-    
+
     for (int i = 0; i < channelRanges.size(); ++i) {
         ctrlptrs[i]->resetAllStats();
     }
@@ -212,22 +212,22 @@ HybridMem::rightRatioCheck()
     PcmLFUDA.printLFU();
     std::cout<< "LFUDA_DRAM :";
     DramLFUDA.printLFU();
-    
+
     for (auto &iter : migrationPagesPI) {
         std::cout<<iter.second<<", ";
         if (iter.second > 5) count+=1;
     }
-    rightRatioSum += std::isnan(count /migrationPagesPI.size())? 
+    rightRatioSum += std::isnan(count /migrationPagesPI.size())?
                         0.0 : count /migrationPagesPI.size();
     std::cout<<"\n"<<"Right ratio: "<<count /migrationPagesPI.size()<<"\n";
     migrationPagesPI.clear();
-    
+
     updateStatisticInfo();
     std::cout<<"D-RQL: "<<avgRdQLenDRAM<<" D-WQL: "<<avgWrQLenDRAM<<"\n";
     std::cout<<"P-RQL: "<<avgRdQLenPCM <<" P-WQL: "<<avgWrQLenPCM <<"\n";
     std::cout<<"PCM "<<avgMemLatencyPCM<<"x"<< ctrlptrs[mainMem_id.val]->readBurstsPI.value()<<" DRAM "<<avgMemLatencyDRAM<<"x"<< ctrlptrs[cacheMem_id.val]->readBurstsPI.value()<<"\n";
     std::cout<<"PCM "<<avgBWPCM<<"/"<<avgWrBWPCM<<" DRAM "<<avgBWDRAM<<"/"<<avgWrBWDRAM<<"\n";
-    
+
     ++totalInterval;
     ++intervalCount;
 }
@@ -239,15 +239,15 @@ HybridMem::processRegularBalancedEvent()
     // timeInterval = 1000000000;//1ms
     schedule(regularBalancedEvent, curTick() + timeInterval);
     *(const_cast<unsigned *>(&maxMigrationTasks)) = 32;
-    
+
     rightRatioCheck();
-    
+
     ++skipInterval;
     if (skipInterval < 1) {
         resetPerInterval();
         return;
     }
-    
+
     size_t migrationPageNum;
 
     double LatencyXTickPCM = avgMemLatencyPCM * avgRdQLenPCM;
@@ -265,7 +265,7 @@ HybridMem::processRegularBalancedEvent()
     }
     ++unbalanceCount;
     MigrationTimeStartAt = curTick();
-    // pendingReqsPriorMigration = 
+    // pendingReqsPriorMigration =
     //             dirCtrlPtr->memoryPort.reqQueue.transmitList.size();
     if (LatencyXTickDRAM < LatencyXTickPCM) {
         // std::vector<Addr> tmpHostPages;
@@ -276,7 +276,7 @@ HybridMem::processRegularBalancedEvent()
         // getMigrationPageNum(migrationPageNum, avgBWDRAM, avgBWPCM);
         getMigrationPageNum(migrationPageNum, LatencyXTickDRAM, LatencyXTickPCM);
         // migrationPageNum = PcmLFUDA.capacity();
-        
+
         genMigrationTasks(migrationPageNum, true);
 
     } else {
@@ -291,11 +291,11 @@ HybridMem::processRegularBalancedEvent()
 
         // getMigrationPageNum(migrationPageNum, avgBWDRAM, avgBWPCM);
         getMigrationPageNum(migrationPageNum, LatencyXTickDRAM, LatencyXTickPCM);
-        
+
         genMigrationTasks(migrationPageNum, false);
 
     }
-    
+
     resetPerInterval();
 
     return;
@@ -319,7 +319,7 @@ HybridMem::getPageRanking(std::vector<Addr>& v)
         } else {
             tmp.dram_PN = std::numeric_limits<Addr>::max();
         }
-        
+
         int sum = page->readcount + page->writecount * write_ratio;
         if (sum > DValueMax) {
             sum = DValueMax;
@@ -346,7 +346,7 @@ HybridMem::PCMtoDRAMsort(const SortHostPage& a, const SortHostPage& b)
     } else {
         return a.writecount > b.writecount;
     }
-    
+
 }
 
 bool
@@ -375,9 +375,9 @@ HybridMem::getMigrationPageNum(size_t& migrationPageNum,
     double targetLatency = double(DRAMLatency + PCMLatency) / 2;
     // double dramAvgQLen = avgRdQLenDRAM + 1;
     // double pcmAvgQLen = avgRdQLenPCM + 1;
-    
+
     if (DRAMLatency <= PCMLatency) {
-        if (PCMLatency > 0 && DRAMLatency > 0) {          
+        if (PCMLatency > 0 && DRAMLatency > 0) {
             // if (waiting_by_dram + waiting_by_pcm > 5) {
             //     dram_avg_req = 5;
             //     pcm_avg_req = 5;
@@ -393,7 +393,7 @@ HybridMem::getMigrationPageNum(size_t& migrationPageNum,
                 struct FrameAddr dram_PN = {std::numeric_limits<Addr>::max()};
                 if (page->isValid(cacheMem_id))
                     dram_PN = page->getFrameAddr(cacheMem_id);
-                
+
                 if (dram_PN.val == std::numeric_limits<Addr>::max()) {
                     if (needDramPage < freeFrames) {
                         needDramPage++;
@@ -408,10 +408,10 @@ HybridMem::getMigrationPageNum(size_t& migrationPageNum,
                 rowHit = page->predictRowHit;
                 rowMiss = page->predictRowMiss;
 
-                double infDram = 
+                double infDram =
                         (double)(rowHit + rowMiss * MISSHITRATIODRAM);
                 double infPcm = (double)page->RWScoresPerInterval;
-                
+
                 assert(infPcm <= infPcmMax);
                 if (infDram > infDramMax) {
                     infDram = infDramMax;
@@ -469,7 +469,7 @@ HybridMem::getMigrationPageNum(size_t& migrationPageNum,
                             std::min(migrationPageNum, max_page_migration_from_dram_to_pcm);*/
         }
     }
-    
+
     if (migrationPageNum > maxMigrationTasks)
         migrationPageNum = maxMigrationTasks;
 }
@@ -479,13 +479,13 @@ HybridMem::genMigrationTasks(size_t &migrationPageNum, bool pcm2dram)
 {
     assert(migrationPageNum <= maxMigrationTasks);
     if (pcm2dram) {
-        if (pools.poolOf(cacheMem_id)->getFreeFrameSize() < 
+        if (pools.poolOf(cacheMem_id)->getFreeFrameSize() <
                 migrationPageNum) {
             migrationPageNum /= 2;
             genDramMigrationTasks(migrationPageNum);
             std::cout<<"genDramEvictedMigrationTasks "<<migrationPageNum<<"\n";
         }
-    
+
         genPcmMigrationTasks(migrationPageNum);
         std::cout<<"genPcmMigrationTasks "<<migrationPageNum<<"\n";
     } else {
@@ -500,39 +500,39 @@ HybridMem::resetPerInterval()
     for (auto ctrlptr : ctrlptrs) {
         ctrlptr->resetPerInterval();
     }
-        
+
     mapRef.clear();
-    
+
     DramLFUDA.reset();
     PcmLFUDA.reset();
     rankingDramLRU.reset();
     rankingPcmLRU.reset();
-    
+
     avgMemLatencyPCM = 0.0;
     avgMemLatencyDRAM = 0.0;
     // avgRdQLenPCM = 0.0;
     // avgRdQLenDRAM = 0.0;
-    
+
     avgTimeSwitchRowPCM = 0;
     avgTimeSwitchRowDRAM = 0;
-    
+
     pcmScore = 0;
     dramScore = 0;
-    
+
     refPagePerIntervalnum = 0;
     refPageinDramPerIntervalnum = 0;
     refPageinPcmPerIntervalnum = 0;
-    
+
     reqInDramCount = 0;
     reqInPcmCount = 0;
-    
+
 }
 
 void
 HybridMem::resetPages()
 {
     pages.resetPageCounters();
-    
+
 }
 
 void
@@ -555,17 +555,17 @@ HybridMem::genDramEvictedMigrationTasks(size_t &halfMigrationPageNum)
         assert(migrationPages.find(host_PN)!=migrationPages.end());
         migrationPages.erase(host_PN);
         if (page->isPageCache) {++pageCacheCount;}
-        
+
         if (migrationPagesPI.find(host_PN)!=migrationPagesPI.end())
             migrationPagesPI.erase(host_PN);
         // struct FrameAddr frame_addr = page->getPossession();
-        
+
         if (page->isInvalid(mainMem_id) || page->isUnused(mainMem_id)) {
             assert(tryIssueMigrationTask(page, cacheMem_id, mainMem_id));
         } else{
             //nothing to do
         }
-        
+
         page->freeFrame(cacheMem_id);
         page->isInDram = false;
         page->claimChannelIsValid(mainMem_id);
@@ -600,7 +600,7 @@ HybridMem::genPcmMigrationTasks(size_t &migrationPageNum)
         migrationPages[host_PN] = 0;
         migrationPagesPI[host_PN] = 0;
         if (page->isPageCache) {++pageCacheCount;}
-        
+
         if (page->isInvalid(cacheMem_id) || page->isUnused(cacheMem_id)) {
             struct FrameAddr frame_addr;
             assert(pools.poolOf(cacheMem_id)->tryGetAnyFreeFrame(&frame_addr));
@@ -608,7 +608,7 @@ HybridMem::genPcmMigrationTasks(size_t &migrationPageNum)
                 page->freeFrame(cacheMem_id);
             page->allocFrame(cacheMem_id, frame_addr);
             assert(tryIssueMigrationTask(page, mainMem_id, cacheMem_id));
-                                 
+
         } else {
             //nothing to do
         }
@@ -627,7 +627,7 @@ HybridMem::genDramMigrationTasks(size_t &migrationPageNum)
         migrationPageNum = 0;
         return;
     }
-    
+
     int cur = DramLFUDA.tail;
     int pageCacheCount = 0;
     size_t migrationCount = 0;
@@ -647,19 +647,19 @@ HybridMem::genDramMigrationTasks(size_t &migrationPageNum)
         assert(migrationPages.find(host_PN)!=migrationPages.end());
         migrationPages.erase(host_PN);
         if (page->isPageCache) {++pageCacheCount;}
-        
+
         if (migrationPagesPI.find(host_PN)!=migrationPagesPI.end())
             migrationPagesPI.erase(host_PN);
-              
+
         if (page->isInvalid(mainMem_id) || page->isUnused(mainMem_id)) {
             assert(tryIssueMigrationTask(page, cacheMem_id, mainMem_id));
         } else {
             //nothing to do
         }
-        
+
         if (pools.poolOf(cacheMem_id)->getFreeFrameSize() < maxMigrationTasks)
             page->freeFrame(cacheMem_id);
-            
+
         page->isInDram = false;
         page->claimChannelIsValid(mainMem_id);
     }
@@ -677,7 +677,7 @@ HybridMem::getPort(const std::string &if_name, PortID idx)
         // the slave port index translates directly to the vector position
         return slavePort;
     } else {
-        return MemObject::getPort(if_name, idx);
+        return ClockedObject::getPort(if_name, idx);
     }
 }
 
@@ -924,11 +924,11 @@ HybridMem::recvTimingReq(PacketPtr pkt)
             assert(0);
         }
     }
-    
+
     if (pkt->masterId() == dmaDeviceId && isWrite && !page->isDirty
         && page->readcount == 0 && page->writecount == 0) {
         updateBWInfo();
-        
+
         // if (3.36*ctrlptrs[mainMem_id.val]->totalWriteQueueSize >= ctrlptrs[cacheMem_id.val]->totalWriteQueueSize) {
         //     //3.36* avgWrBWPCM > avgWrBWDRAM
         //     if (page->isUnused(cacheMem_id)) {
@@ -938,7 +938,7 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         //             page->freeFrame(cacheMem_id);
         //         page->allocFrame(cacheMem_id, frame_addr);
         //         // assert(tryIssueMigrationTask(page, mainMem_id, cacheMem_id));
-                                 
+
         //     } else {
         //         //nothing to do
         //     }
@@ -981,16 +981,16 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         } else {
             ++reqInPcmCount;
         }
-            
+
         auto iterPI = migrationPagesPI.find(page->getPageAddr().val);
         if (iterPI != migrationPagesPI.end()) {
             ++reqInDramCountPI;
             iterPI->second += 1;
         }
-        
+
         predicRowHitOrMiss(page);
         assert(!(isRead && isWrite));
-        if (isRead) { 
+        if (isRead) {
             page->launchReadTo(channel_idx);
             page->readreqPerInterval++;
         }
@@ -999,7 +999,7 @@ HybridMem::recvTimingReq(PacketPtr pkt)
             page->writereqPerInterval++;
             page->isDirty = true;
         }
-        
+
         // /*
         // //Invalid page of bin to DRAM
         // // For simplicity, requests are assumed to be 8 byte-sized
@@ -1037,7 +1037,7 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         sent = SentState::sMASTER;
         reschedule(releaseSentStateEvent, releaseSentStateTick, true);
     }
-    
+
     if (!regularBalancedEvent.scheduled()) {
         processRegularBalancedEvent();
     }
@@ -1232,11 +1232,11 @@ HybridMem::recvTimingMigrationResp(PacketPtr pkt)
         // std::cout<<"migrationTasks size: "<<migrationTasks.end()-migrationTasks.begin()<<"\n";
         if (migrationTasks.end()-migrationTasks.begin() == 0) {
             totMemMigrationTime += curTick() - MigrationTimeStartAt;
-            // totBlockedReqsForMigration += 
-            //     dirCtrlPtr->memoryPort.reqQueue.transmitList.size() -  
+            // totBlockedReqsForMigration +=
+            //     dirCtrlPtr->memoryPort.reqQueue.transmitList.size() -
             //                                         pendingReqsPriorMigration;
         }
-            
+
 
         trySendRetry();
     }
@@ -1665,40 +1665,40 @@ HybridMem::updateStatisticInfo()
 {
     Stats::VResult vr;
     Stats::Result result;
-    
+
     updateBWInfo();
-    
+
     ctrlptrs[mainMem_id.val]->avgMemAccLatPI.result(vr);
     avgMemLatencyPCM = std::isnan(vr.at(0))? 0.0 : vr.at(0);
     avgMemLatencyPCM = std::isinf(vr.at(0))? 0.0 : avgMemLatencyPCM;
     ctrlptrs[cacheMem_id.val]->avgMemAccLatPI.result(vr);
     avgMemLatencyDRAM = std::isnan(vr.at(0))? 0.0 : vr.at(0);
     avgMemLatencyDRAM = std::isinf(vr.at(0))? 0.0 : avgMemLatencyDRAM;
-    
+
     avgTimeSwitchRowPCM = ctrlptrs[mainMem_id.val]->avgTimeSwitchRow();
     avgTimeSwitchRowDRAM = ctrlptrs[cacheMem_id.val]->avgTimeSwitchRow();
-    
+
     ctrlptrs[mainMem_id.val]->avgRdQLenPI.prepare();
     result = ctrlptrs[mainMem_id.val]->avgRdQLenPI.result();
     avgRdQLenPCM = std::max(result, Stats::Result(0));
     ctrlptrs[cacheMem_id.val]->avgRdQLenPI.prepare();
     result = ctrlptrs[cacheMem_id.val]->avgRdQLenPI.result();
     avgRdQLenDRAM = std::max(result, Stats::Result(0));
-    
+
     ctrlptrs[mainMem_id.val]->avgWrQLenPI.prepare();
     result = ctrlptrs[mainMem_id.val]->avgWrQLenPI.result();
     avgWrQLenPCM = std::max(result, Stats::Result(0));
     ctrlptrs[cacheMem_id.val]->avgWrQLenPI.prepare();
     result = ctrlptrs[cacheMem_id.val]->avgWrQLenPI.result();
     avgWrQLenDRAM = std::max(result, Stats::Result(0));
-    
+
 }
 
 void
 HybridMem::updateBWInfo()
 {
     Stats::VResult vr;
-    
+
     ctrlptrs[mainMem_id.val]->avgRdBWPI.result(vr);
     avgBWPCM = vr.at(0);
     ctrlptrs[mainMem_id.val]->avgWrBWPI.result(vr);
@@ -1720,12 +1720,12 @@ HybridMem::CountScoreinc(struct PageAddr pageaddr, bool isRead, bool hit, uint64
 {
     class Page *page = pages.pageOf(pageaddr);
     bool indram = page->isInDram;
-    
+
     if (page->lastAccessInterval != totalInterval) {
         page->resetPageCounters();
         page->lastAccessInterval = totalInterval;
     }
-    
+
     if (isRead) {
         ReadCountinc(page, qlen);
         if (page->isPageCache && page->readcount < 0) {
@@ -1737,7 +1737,7 @@ HybridMem::CountScoreinc(struct PageAddr pageaddr, bool isRead, bool hit, uint64
             return;
         }
     }
-    
+
     if (indram) {
         if (hit)
                 dramScore += addScoreToPage(page, 1);
@@ -1770,7 +1770,7 @@ HybridMem::ReadCountinc(class Page *page, uint64_t qlen)
 
     int preReadcount = page->readcount++;
     assert(preReadcount < page->readcount);
-    
+
     if (page->isPageCache && (page->readcount < 0 || page->writecount < 0)) {
         return;
     }
@@ -1779,7 +1779,7 @@ HybridMem::ReadCountinc(class Page *page, uint64_t qlen)
     } else {
         if ((double)qlen < avgRdQLenPCM/2) {return;}
     }
-    
+
 
     struct PageAddr evictPN;
     if (page->isInDram) {
@@ -1793,7 +1793,7 @@ HybridMem::ReadCountinc(class Page *page, uint64_t qlen)
         // evict_PN = rankingPcmLRU.put(pageAddr);
         //check_PCM_score();
     }
-    
+
     if (evictPN.val != std::numeric_limits<Addr>::max()) {
         class Page *_page = pages.pageOf(evictPN);
         if (_page->isInDram) {
@@ -1827,7 +1827,7 @@ HybridMem::WriteCountinc(class Page *page, uint64_t qlen)
     if (page->isPageCache && (page->readcount < 0 || page->writecount < 0)) {
         return;
     }
-    
+
     if (page->isInDram) {
         if (qlen > 32) {return;}
     } else {
@@ -1846,7 +1846,7 @@ HybridMem::WriteCountinc(class Page *page, uint64_t qlen)
         // evictPN = rankingPcmLRU.put(pageAddr);
         //check_PCM_score();
     }
-    
+
     if (evictPN.val != std::numeric_limits<Addr>::max()) {
         class Page *_page = pages.pageOf(evictPN);
         if (_page->isInDram) {
@@ -1929,7 +1929,7 @@ HybridMem::LRU::isEmpty()
         if (exist[i]) {
            rv = false; return rv;
         }
-            
+
     }
 
     return rv;
@@ -1995,7 +1995,7 @@ struct HybridMem::PageAddr
 HybridMem::LRU::firstPut(Addr hostAddr)
 {
     assert(size == 0);
-    
+
     struct PageAddr pageAddr;
     member[size].hostAddr = hostAddr;
     member[size].pre = -1;
@@ -2065,45 +2065,45 @@ HybridMem::regStats()
 {
     using namespace Stats;
     ClockedObject::regStats();
-    
+
     registerResetCallback(new HybridmemResetCallback(this));
-    
+
     intervalCount
         .name(name() + ".intervalCount")
         .desc("Total number of interval");
-    
+
     balanceCount
         .name(name() + ".balanceCount")
         .desc("Total number of balance interval");
-    
+
     unbalanceCount
         .name(name() + ".unbalanceCount")
         .desc("Total number of unbalance interval");
-    
+
     rightRatioSum
         .name(name() + ".rightRatioSum")
         .desc("Sum of each right ratio");
-        
+
     rightRatio
         .name(name() + ".rightRatio")
         .desc("right ratio unit: percent")
         .precision(2);
 
     rightRatio = (rightRatioSum *100) / intervalCount;
-    
+
     totMemMigrationTime
         .name(name() + ".totMemMigrationTime")
         .desc("Total ticks spent from issue first migration pkt until  "
               " all migration done");
-              
+
     totBlockedReqsForMigration
         .name(name() + ".totBlockedReqsForMigration")
         .desc("Total number of reqs blocked for migration");
-        
+
     lastWarmupAt
         .name(name() + ".lastWarmupAt")
         .desc("last warmup/reset tick");
-    
+
     badMigrationPageCount
         .name(name() + ".badMigrationPageCount")
         .desc("The count of page migrated to and back PCM/DRAM");

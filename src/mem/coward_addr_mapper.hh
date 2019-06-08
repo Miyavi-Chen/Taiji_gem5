@@ -52,7 +52,7 @@
  * currently not modified.
  */
 
-class CowardAddrMapper : public MemObject
+class CowardAddrMapper : public ClockedObject
 {
 
   public:

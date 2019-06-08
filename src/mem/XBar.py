@@ -198,7 +198,7 @@ class IOXBar(NoncoherentXBar):
     forward_latency = 1
     response_latency = 2
 
-class ZeroXBar(MemObject):
+class ZeroXBar(ClockedObject):
     type = 'ZeroXBar'
     abstract = True
     cxx_header = "mem/zero_xbar.hh"

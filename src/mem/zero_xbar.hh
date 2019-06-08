@@ -70,7 +70,7 @@
  * The ZeroXBar is responsible for the basic flow control (busy or
  * not), the administration of retries, and the address decoding.
  */
-class ZeroXBar : public MemObject
+class ZeroXBar : public ClockedObject
 {
 
   protected:

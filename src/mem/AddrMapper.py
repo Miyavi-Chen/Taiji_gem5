@@ -36,7 +36,9 @@
 # Authors: Andreas Hansson
 
 from m5.params import *
+from m5.proxy import *
 from m5.SimObject import SimObject
+from m5.objects.ClockedObject import ClockedObject
 
 # An address mapper changes the packet addresses in going from the
 # slave port side of the mapper to the master port side. When the
@@ -71,7 +73,7 @@ class RangeAddrMapper(AddrMapper):
     remapped_ranges = VectorParam.AddrRange(
         "Ranges of memory that are being mapped to")
 
-class CowardAddrMapper(MemObject):
+class CowardAddrMapper(ClockedObject):
     type = 'CowardAddrMapper'
     cxx_header = 'mem/coward_addr_mapper.hh'
 
@@ -85,7 +87,7 @@ class CowardAddrMapper(MemObject):
 
     verbose = Param.Bool(False, "Print information")
 
-class HomeAgent(MemObject):
+class HomeAgent(ClockedObject):
     type = 'HomeAgent'
     cxx_header = 'mem/home_agent.hh'
 
@@ -99,7 +101,7 @@ class HomeAgent(MemObject):
 
     verbose = Param.Bool(False, "Print information")
 
-class FlexMem(MemObject):
+class FlexMem(ClockedObject):
     type = 'FlexMem'
     cxx_header = 'mem/flex_mem.hh'
 
@@ -115,7 +117,7 @@ class FlexMem(MemObject):
     sys = Param.System(Parent.any, "System we belong to")
     intlv_size = Param.MemorySize("Channel interleaving size")
 
-class HybridMem(MemObject):
+class HybridMem(ClockedObject):
     type = 'HybridMem'
     cxx_header = 'mem/hybrid_mem.hh'
 
