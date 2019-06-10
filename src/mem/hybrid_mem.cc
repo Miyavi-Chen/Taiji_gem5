@@ -37,6 +37,7 @@
  * Authors: Andreas Hansson
  */
 #include <cmath>
+#include "sim/full_system.hh"
 #include "mem/hybrid_mem.hh"
 #include "mem/ruby/slicc_interface/AbstractController.hh"
 #include "sim/stat_control.hh"
@@ -88,7 +89,10 @@ HybridMem::HybridMem(const HybridMemParams* p)
       DValueMax(1024), infDramMax(DValueMax), infPcmMax(DValueMax),
       refPagePerIntervalnum(0), refPageinDramPerIntervalnum(0),
       refPageinPcmPerIntervalnum(0), reqInDramCount(0), reqInPcmCount(0),
-      reqInDramCountPI(0), MigrationTimeStartAt(0)
+      reqInDramCountPI(0), MigrationTimeStartAt(0),
+      prevArrival(0), reqsPI(0), totGapPI(0),
+      avgGapPI(0), totBlockedreqMemAccLatPI(0),
+      totBlockedreqMemAccLatWDelayPI(0), blockedreqThisInterval(0)
 {
     if (physRanges.size() != memRanges.size())
         fatal("HybridMem: original and shadowed range list must "
@@ -184,9 +188,12 @@ HybridMem::init()
 void
 HybridMem::startup()
 {
-    // schedule(warmUpEvent, timeWarmup);
-    if (timeInterval == 0)
-        return;
+    if (!FullSystem) {
+        schedule(warmUpEvent, curTick() + timeWarmup);
+        std::cout<<"Schedule warmUpEvent when start up \n";
+    }
+
+    if (timeInterval == 0) {return;}
     schedule(regularBalancedEvent, curTick() + timeInterval);
 }
 
@@ -205,27 +212,40 @@ HybridMem::processWarmUpEvent()
 }
 
 void
-HybridMem::rightRatioCheck()
+HybridMem::statisticInfoCheck()
 {
+    // std::cout<< "LFUDA_PCM :";
+    // PcmLFUDA.printLFU();
+    // std::cout<< "LFUDA_DRAM :";
+    // DramLFUDA.printLFU();
     double count = 0.0;
-    std::cout<< "LFUDA_PCM :";
-    PcmLFUDA.printLFU();
-    std::cout<< "LFUDA_DRAM :";
-    DramLFUDA.printLFU();
-
     for (auto &iter : migrationPagesPI) {
-        std::cout<<iter.second<<", ";
+        // std::cout<<iter.second<<", ";
         if (iter.second > 5) count+=1;
     }
     rightRatioSum += std::isnan(count /migrationPagesPI.size())?
                         0.0 : count /migrationPagesPI.size();
-    std::cout<<"\n"<<"Right ratio: "<<count /migrationPagesPI.size()<<"\n";
+    // std::cout<<"\n"<<"Right ratio: "<<count /migrationPagesPI.size()<<"\n";
     migrationPagesPI.clear();
+
+    if (!reqBlockedTickDiff.empty()) {
+        totBlockedReqsForMigration -= reqBlockedTickDiff.size();
+        blockedreqThisInterval -= reqBlockedTickDiff.size();
+        reqBlockedTickDiff.clear();
+    }
+    avgGapPI =totGapPI / reqsPI;
+    if (blockedreqThisInterval) {
+        std::cout<<"blockedreqThisInterval "<<blockedreqThisInterval<<"\n";
+        std::cout<<"Lat_o: "<<totBlockedreqMemAccLatPI
+            / blockedreqThisInterval / 1000<<" ";
+        std::cout<<"Lat_w_d: "<<totBlockedreqMemAccLatWDelayPI
+            / blockedreqThisInterval / 1000<<"\n";
+    }
 
     updateStatisticInfo();
     std::cout<<"D-RQL: "<<avgRdQLenDRAM<<" D-WQL: "<<avgWrQLenDRAM<<"\n";
     std::cout<<"P-RQL: "<<avgRdQLenPCM <<" P-WQL: "<<avgWrQLenPCM <<"\n";
-    std::cout<<"PCM "<<avgMemLatencyPCM<<"x"<< ctrlptrs[mainMem_id.val]->readBurstsPI.value()<<" DRAM "<<avgMemLatencyDRAM<<"x"<< ctrlptrs[cacheMem_id.val]->readBurstsPI.value()<<"\n";
+    std::cout<<"PCM "<<avgMemLatencyPCM/1000<<"x"<< ctrlptrs[mainMem_id.val]->readBurstsPI.value()<<" DRAM "<<avgMemLatencyDRAM/1000<<"x"<< ctrlptrs[cacheMem_id.val]->readBurstsPI.value()<<"\n";
     std::cout<<"PCM "<<avgBWPCM<<"/"<<avgWrBWPCM<<" DRAM "<<avgBWDRAM<<"/"<<avgWrBWDRAM<<"\n";
 
     ++totalInterval;
@@ -240,7 +260,7 @@ HybridMem::processRegularBalancedEvent()
     schedule(regularBalancedEvent, curTick() + timeInterval);
     *(const_cast<unsigned *>(&maxMigrationTasks)) = 32;
 
-    rightRatioCheck();
+    statisticInfoCheck();
 
     ++skipInterval;
     if (skipInterval < 1) {
@@ -257,16 +277,15 @@ HybridMem::processRegularBalancedEvent()
         ++balanceCount;
         std::cout<<"Balanced"<<"\n";
         resetPerInterval();
-        if (!hasWarmedUp) {
-            hasWarmedUp = true;
-            schedule(warmUpEvent, curTick() + timeWarmup);
-        }
+        // if (!hasWarmedUp) {
+        //     hasWarmedUp = true;
+        //     schedule(warmUpEvent, curTick() + timeWarmup);
+        // }
         return;
     }
     ++unbalanceCount;
     MigrationTimeStartAt = curTick();
-    // pendingReqsPriorMigration =
-    //             dirCtrlPtr->memoryPort.reqQueue.transmitList.size();
+
     if (LatencyXTickDRAM < LatencyXTickPCM) {
         // std::vector<Addr> tmpHostPages;
         // rankingPcmLRU.getAllHostPages(tmpHostPages);
@@ -526,6 +545,12 @@ HybridMem::resetPerInterval()
     reqInDramCount = 0;
     reqInPcmCount = 0;
 
+    totBlockedreqMemAccLatPI = 0;
+    totBlockedreqMemAccLatWDelayPI = 0;
+    blockedreqThisInterval = 0;
+
+    totGapPI = 0;
+    reqsPI = 0;
 }
 
 void
@@ -571,7 +596,7 @@ HybridMem::genDramEvictedMigrationTasks(size_t &halfMigrationPageNum)
         page->claimChannelIsValid(mainMem_id);
     }
     halfMigrationPageNum = migrationCount;
-    std::cout<< "Page cache count: "<< pageCacheCount<<"\n";
+    // std::cout<< "Page cache count: "<< pageCacheCount<<"\n";
 }
 
 void
@@ -616,7 +641,7 @@ HybridMem::genPcmMigrationTasks(size_t &migrationPageNum)
         page->claimChannelIsValid(cacheMem_id);
     }
     migrationPageNum = migrationCount;
-    std::cout<< "Page cache count: "<< pageCacheCount<<"\n";
+    // std::cout<< "Page cache count: "<< pageCacheCount<<"\n";
 }
 
 void
@@ -664,7 +689,24 @@ HybridMem::genDramMigrationTasks(size_t &migrationPageNum)
         page->claimChannelIsValid(mainMem_id);
     }
     migrationPageNum = migrationCount;
-    std::cout<< "Page cache count: "<< pageCacheCount<<"\n";
+    // std::cout<< "Page cache count: "<< pageCacheCount<<"\n";
+}
+void
+HybridMem::reqBlockedTickDiffUpdate()
+{
+    blockedreqThisInterval =
+                (curTick() - MigrationTimeStartAt) / avgGapPI;
+    totBlockedReqsForMigration += blockedreqThisInterval;
+    for (int i = 0; i < blockedreqThisInterval; ++i) {
+        reqBlockedTickDiff.push_back(curTick() -
+                            (MigrationTimeStartAt + (i+1)*avgGapPI));
+    }
+    // while (!reqBlockedAt.empty()) {
+    //     reqBlockedTickDiff.push_back(curTick() - reqBlockedAt.front());
+    //     reqBlockedAt.pop_front();
+    // }
+    // assert(reqBlockedAt.empty());
+
 }
 
 Port &
@@ -789,7 +831,8 @@ HybridMem::tryIssueMigrationTask(class Page *page,
     migrationTasks.push_back(task);
     ++(page->migrationCount);
     page->lastMigrationInterval = totalInterval;
-    if (page->migrationCount > 1) {
+    ++migrationPageCount;
+    if (page->migrationCount > 2) {
         ++badMigrationPageCount;
     }
 
@@ -883,9 +926,16 @@ HybridMem::recvTimingReq(PacketPtr pkt)
     const bool isWrite = pkt->isWrite();
     class Page *page = pages.pageOf(toPageAddr(pkt));
 
+    // Calc avg gap between requests
+    if (prevArrival != 0) {
+        totGap += curTick() - prevArrival;
+        totGapPI += curTick() - prevArrival;
+    }
+    prevArrival = curTick();
+
     if (page->inMigrating()) {
         page->bookingMasterWaiting();
-        totBlockedReqsForMigration += 1;
+        // totBlockedReqsForMigration += 1;
         return false;
     }
 
@@ -918,7 +968,8 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         } else if (wait == WaitState::tryMASTER_wSELF) {
             // wait = WaitState::wMASTER_wSELF;
             wait = WaitState::wSELF_wMASTER;
-            totBlockedReqsForMigration += 1;
+            // totBlockedReqsForMigration += 1;
+            // reqBlockedAt.push_back(curTick());
             return false;
         } else {
             assert(0);
@@ -946,9 +997,9 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         //     page->claimChannelIsValid(cacheMem_id);
         // }
         if (!warmUpEvent.scheduled()) {
-            schedule(warmUpEvent, curTick() + 500000000);
+            schedule(warmUpEvent, curTick() + timeWarmup);
         } else {
-            reschedule(warmUpEvent, curTick() + 500000000);
+            reschedule(warmUpEvent, curTick() + timeWarmup);
         }
         page->isPageCache = true;
         page->writecount = page->readcount = -64;
@@ -965,6 +1016,13 @@ HybridMem::recvTimingReq(PacketPtr pkt)
 
     if (needsResponse && !cacheResponding) {
         pkt->pushSenderState(new HybridMemSenderState(mem_addr));
+    }
+
+    if (!reqBlockedTickDiff.empty() && !pkt->needAddDelay) {
+        pkt->needAddDelay = true;
+        pkt->delay = reqBlockedTickDiff.front();
+        if (!pkt->delay) {pkt->needAddDelay = false;}
+        reqBlockedTickDiff.pop_front();
     }
     pkt->setAddr(channel_addr);
     const bool successful = masterPort.sendTimingReq(pkt);
@@ -991,10 +1049,14 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         predicRowHitOrMiss(page);
         assert(!(isRead && isWrite));
         if (isRead) {
+            readReqs++;
+            reqsPI++;
             page->launchReadTo(channel_idx);
             page->readreqPerInterval++;
         }
         if (isWrite) {
+            writeReqs++;
+            reqsPI++;
             page->launchWriteTo(channel_idx);
             page->writereqPerInterval++;
             page->isDirty = true;
@@ -1232,9 +1294,8 @@ HybridMem::recvTimingMigrationResp(PacketPtr pkt)
         // std::cout<<"migrationTasks size: "<<migrationTasks.end()-migrationTasks.begin()<<"\n";
         if (migrationTasks.end()-migrationTasks.begin() == 0) {
             totMemMigrationTime += curTick() - MigrationTimeStartAt;
-            // totBlockedReqsForMigration +=
-            //     dirCtrlPtr->memoryPort.reqQueue.transmitList.size() -
-            //                                         pendingReqsPriorMigration;
+            reqBlockedTickDiffUpdate();
+
         }
 
 
@@ -1275,7 +1336,7 @@ HybridMem::trySendRetry()
                 assert(0);
             } else if (wait == WaitState::wSELF_wMASTER) {
                 wait = WaitState::trySELF_wMASTER;
-                totBlockedReqsForMigration += 1;
+                // totBlockedReqsForMigration += 1;
                 issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
                     wait = WaitState::wMASTER;
@@ -1289,7 +1350,7 @@ HybridMem::trySendRetry()
             } else if (wait == WaitState::wMASTER_wSELF) {
                 // wait = WaitState::tryMASTER_wSELF;
                 // slavePort.sendRetryReq();
-                totBlockedReqsForMigration += 1;
+                // totBlockedReqsForMigration += 1;
                 wait = WaitState::trySELF_wMASTER;
                 issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
@@ -1318,7 +1379,7 @@ HybridMem::trySendRetry()
             } else if (wait == WaitState::wMASTER_wSELF) {
                 // wait = WaitState::tryMASTER_wSELF;
                 // slavePort.sendRetryReq();
-                totBlockedReqsForMigration += 1;
+                // totBlockedReqsForMigration += 1;
                 wait = WaitState::trySELF_wMASTER;
                 issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
@@ -1337,7 +1398,7 @@ HybridMem::trySendRetry()
             if (false) {
                 assert(0);
             } else if (wait == WaitState::wSELF_wMASTER) {
-                totBlockedReqsForMigration += 1;
+                // totBlockedReqsForMigration += 1;
                 wait = WaitState::trySELF_wMASTER;
                 issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
@@ -2068,6 +2129,14 @@ HybridMem::regStats()
 
     registerResetCallback(new HybridmemResetCallback(this));
 
+    readReqs
+        .name(name() + ".readReqs")
+        .desc("Number of read requests accepted");
+
+    writeReqs
+        .name(name() + ".writeReqs")
+        .desc("Number of write requests accepted");
+
     intervalCount
         .name(name() + ".intervalCount")
         .desc("Total number of interval");
@@ -2107,6 +2176,46 @@ HybridMem::regStats()
     badMigrationPageCount
         .name(name() + ".badMigrationPageCount")
         .desc("The count of page migrated to and back PCM/DRAM");
+
+    migrationPageCount
+        .name(name() + ".migrationPageCount")
+        .desc("The count of page migrated to or back PCM/DRAM");
+
+    totBlockedreqMemAccLat
+        .name(name() + ".totBlockedreqMemAccLat")
+        .desc("Total ticks of blocked req spent from burst creation "
+              "until serviced by the Ctrl");
+
+    totBlockedreqMemAccLatWDelay
+        .name(name() + ".totBlockedreqMemAccLatWDelay")
+        .desc("Total ticks of blocked req with delay spent from burst creation "
+              "until serviced by the Ctrl");
+
+    avgBlockedreqMemAccLat
+        .name(name() + ".avgBlockedreqMemAccLat")
+        .desc("Average memory access latency per blocked burst")
+        .precision(2);
+
+    avgBlockedreqMemAccLatWDelay
+        .name(name() + ".avgBlockedreqMemAccLatWDelay")
+        .desc("Average memory access latency per blocked burst with delay")
+        .precision(2);
+
+    avgBlockedreqMemAccLat =
+        totBlockedreqMemAccLat / totBlockedReqsForMigration;
+    avgBlockedreqMemAccLatWDelay =
+        totBlockedreqMemAccLatWDelay / totBlockedReqsForMigration;
+
+    totGap
+        .name(name() + ".totGap")
+        .desc("Total gap between requests");
+
+    avgGap
+        .name(name() + ".avgGap")
+        .desc("Average gap between requests")
+        .precision(2);
+
+    avgGap = totGap / (readReqs + writeReqs);
 }
 
 HybridMem*

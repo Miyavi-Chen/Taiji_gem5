@@ -438,7 +438,8 @@ class HybridMem : public ClockedObject
           return poolUsed;
         }
 
-        size_t getFreeFrameSize() {
+        size_t getFreeFrameSize()
+        {
           return freeFrameSize;
         }
 
@@ -1606,7 +1607,8 @@ class HybridMem : public ClockedObject
     void resetPerInterval();
     void resetPages();
 
-    void rightRatioCheck();
+    void statisticInfoCheck();
+    void reqBlockedTickDiffUpdate();
 
     void processWarmUpEvent();
     EventFunctionWrapper warmUpEvent;
@@ -1664,6 +1666,8 @@ class HybridMem : public ClockedObject
 
 
     // All statistics that the model needs to capture
+    Stats::Scalar readReqs;
+    Stats::Scalar writeReqs;
     Stats::Scalar intervalCount;
     Stats::Scalar balanceCount;
     Stats::Scalar unbalanceCount;
@@ -1673,11 +1677,28 @@ class HybridMem : public ClockedObject
 
     Tick MigrationTimeStartAt;
     Stats::Scalar totMemMigrationTime;
-
-    size_t pendingReqsPriorMigration;
     Stats::Scalar totBlockedReqsForMigration;
 
     Stats::Scalar lastWarmupAt;
     Stats::Scalar badMigrationPageCount;
+    Stats::Scalar migrationPageCount;
+    Stats::Scalar totBlockedreqMemAccLat;
+    Stats::Scalar totBlockedreqMemAccLatWDelay;
+
+    Tick prevArrival;
+    Tick reqsPI;
+    Tick totGapPI;
+    Tick avgGapPI;
+    Stats::Scalar totGap;
+    Stats::Formula avgGap;
+    Stats::Formula avgBlockedreqMemAccLat;
+    Stats::Formula avgBlockedreqMemAccLatWDelay;
+
+    Tick totBlockedreqMemAccLatPI;
+    Tick totBlockedreqMemAccLatWDelayPI;
+    size_t blockedreqThisInterval;
+    std::deque<Tick> reqBlockedTickDiff;
+
+
 };
 #endif

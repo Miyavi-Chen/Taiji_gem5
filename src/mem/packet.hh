@@ -362,6 +362,8 @@ class Packet : public Printable
 
   public:
 
+    bool needAddDelay;
+    Tick delay;
     /**
      * The extra delay from seeing the packet until the header is
      * transmitted. This delay is used to communicate the crossbar
@@ -812,7 +814,8 @@ class Packet : public Printable
         :  cmd(_cmd), id((PacketId)_req.get()), req(_req),
            physAddrValid(false), physAddr(0),
            data(nullptr), addr(0), _isSecure(false), size(0),
-           _qosValue(0), headerDelay(0), snoopDelay(0),
+           _qosValue(0), needAddDelay(false), delay(0),
+           headerDelay(0), snoopDelay(0),
            payloadDelay(0), senderState(NULL)
     {
         if (req->hasPaddr()) {
@@ -835,7 +838,7 @@ class Packet : public Printable
         :  cmd(_cmd), id(_id ? _id : (PacketId)_req.get()), req(_req),
            physAddrValid(false), physAddr(0),
            data(nullptr), addr(0), _isSecure(false),
-           _qosValue(0), headerDelay(0),
+           _qosValue(0), needAddDelay(false), delay(0), headerDelay(0),
            snoopDelay(0), payloadDelay(0), senderState(NULL)
     {
         if (req->hasPaddr()) {
@@ -860,7 +863,7 @@ class Packet : public Printable
            data(nullptr),
            addr(pkt->addr), _isSecure(pkt->_isSecure), size(pkt->size),
            bytesValid(pkt->bytesValid),
-           _qosValue(pkt->qosValue()),
+           _qosValue(pkt->qosValue()), needAddDelay(false), delay(0),
            headerDelay(pkt->headerDelay),
            snoopDelay(0),
            payloadDelay(pkt->payloadDelay),

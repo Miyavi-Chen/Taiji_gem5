@@ -677,6 +677,9 @@ class DRAMCtrl : public QoS::MemCtrl
         /** This comes from the outside world */
         const PacketPtr pkt;
 
+        bool needAddDelay;
+        Tick delay;
+
         /** MasterID associated with the packet */
         const MasterID _masterId;
 
@@ -777,6 +780,8 @@ class DRAMCtrl : public QoS::MemCtrl
                    uint32_t _row, uint16_t bank_id, Addr _addr,
                    unsigned int _size, Bank& bank_ref, Rank& rank_ref, int64_t qlen)
             : entryTime(curTick()), readyTime(curTick()), pkt(_pkt),
+              needAddDelay(pkt->needAddDelay),
+              delay(needAddDelay ? pkt->delay: 0),
               _masterId(pkt->masterId()), QLen(qlen),
               physAddrValid(pkt->physAddrIsValid()),
               physAddr((physAddrValid) ? (_pkt->getPhysAddr()) : (0)),

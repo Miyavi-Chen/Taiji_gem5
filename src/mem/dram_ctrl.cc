@@ -1815,6 +1815,17 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         masterWriteTotalLat[dram_pkt->masterId()] +=
             dram_pkt->readyTime - dram_pkt->entryTime;
     }
+
+    if (dram_pkt->needAddDelay) {
+        assert(dram_pkt->delay);
+        HybridMemptr->totBlockedreqMemAccLat +=
+            dram_pkt->readyTime - dram_pkt->entryTime;
+        HybridMemptr->totBlockedreqMemAccLatPI +=
+            dram_pkt->readyTime - dram_pkt->entryTime;
+        HybridMemptr->totBlockedreqMemAccLatWDelay += dram_pkt->delay;
+        HybridMemptr->totBlockedreqMemAccLatWDelayPI += dram_pkt->delay;
+
+    }
 }
 
 void
@@ -2414,7 +2425,7 @@ DRAMCtrl::Rank::processRefreshEvent()
         // std::cout<<"Skip Ref at Bin: "<<nextREFBin<<"\n";
 
         // Update for next refresh
-        refreshDueAt += memory.tREFI;
+        refreshDueAt = curTick() + memory.tREFI;
         nextREFBin = (nextREFBin + 1) % TOTALBINS ;
         if (!refreshEvent.scheduled())
             schedule(refreshEvent, refreshDueAt);
@@ -2621,6 +2632,9 @@ DRAMCtrl::Rank::processRefreshEvent()
         // refresh STM and therefore can always schedule next event.
         // Compensate for the delay in actually performing the refresh
         // when scheduling the next one
+        if (refreshDueAt - memory.tRP < curTick()) {
+            refreshDueAt = curTick() + memory.tREFI;
+        }
         schedule(refreshEvent, refreshDueAt - memory.tRP);
         if (memory.enableBinAware)
             nextREFBin = (nextREFBin + 1) % TOTALBINS;
