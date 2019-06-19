@@ -267,6 +267,7 @@ def scriptCheckpoints(options, maxtick, cptdir):
     return exit_event
 
 def benchCheckpoints(options, maxtick, cptdir):
+    print("benchCheckpoints, maxtick "+ str(maxtick))
     exit_event = m5.simulate(maxtick - m5.curTick())
     exit_cause = exit_event.getCause()
 
@@ -462,12 +463,20 @@ def run(options, root, testsys, cpu_class):
             testsys.cpu[i].max_insts_any_thread = options.maxinsts
 
     if cpu_class:
+        print("CPU_CLASS %s" % str(cpu_class))
         switch_cpus = [cpu_class(switched_out=True, cpu_id=(i))
                        for i in range(np)]
 
         for i in range(np):
             if options.fast_forward:
                 testsys.cpu[i].max_insts_any_thread = int(options.fast_forward)
+            if options.warmup_insts:
+                testsys.cpu[i].max_insts_any_thread = int(options.warmup_insts)
+            else:
+                print("Warm: restore CPU != future CPU w/o assign \
+                --warmup-insts")
+                testsys.cpu[i].max_insts_any_thread = int(1)
+
             switch_cpus[i].system = testsys
             switch_cpus[i].workload = testsys.cpu[i].workload
             switch_cpus[i].clk_domain = testsys.cpu[i].clk_domain
@@ -549,7 +558,7 @@ def run(options, root, testsys, cpu_class):
 
             # if restoring, make atomic cpu simulate only a few instructions
             if options.checkpoint_restore != None:
-                testsys.cpu[i].max_insts_any_thread = 1
+                testsys.cpu[i].max_insts_any_thread = 1#options.warmup_insts
             # Fast forward to specified location if we are not restoring
             elif options.fast_forward:
                 testsys.cpu[i].max_insts_any_thread = int(options.fast_forward)
@@ -666,9 +675,10 @@ def run(options, root, testsys, cpu_class):
                     str(testsys.cpu[0].max_insts_any_thread))
             exit_event = m5.simulate()
         else:
-            print("Switch at curTick count:%s" % str(10000))
-            exit_event = m5.simulate(10000)
+            print("Switch at curTick count:%s" % str(options.warmup_insts))
+            exit_event = m5.simulate()
         print("Switched CPUS @ tick %s" % (m5.curTick()))
+        print("Exit Event get cause %s" % (exit_event.getCause()))
 
         m5.switchCpus(testsys, switch_cpu_list)
 
@@ -681,6 +691,8 @@ def run(options, root, testsys, cpu_class):
                 exit_event = m5.simulate()
             else:
                 exit_event = m5.simulate(options.standard_switch)
+
+            print("Exit Event get cause %s" % (exit_event.getCause()))
             print("Switching CPUS @ tick %s" % (m5.curTick()))
             print("Simulation ends instruction count:%d" %
                     (testsys.switch_cpus_1[0].max_insts_any_thread))
@@ -720,6 +732,7 @@ def run(options, root, testsys, cpu_class):
 
         # If checkpoints are being taken, then the checkpoint instruction
         # will occur in the benchmark code it self.
+        m5.stats.reset()
         if options.repeat_switch and maxtick > options.repeat_switch:
             exit_event = repeatSwitch(testsys, repeat_switch_cpu_list,
                                       maxtick, options.repeat_switch)
