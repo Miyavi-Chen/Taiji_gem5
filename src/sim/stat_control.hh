@@ -50,6 +50,7 @@
 namespace Stats {
 
 double statElapsedTime();
+double statElapsedTimeReal();
 
 Tick statElapsedTicks();
 

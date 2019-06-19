@@ -62,14 +62,23 @@
 using namespace std;
 
 Stats::Formula simSeconds;
+Stats::Formula IPC;
+Stats::Value simInstsNoWarmup;
+Stats::Value simOpsNoWarmup;
 Stats::Value simTicks;
 Stats::Value finalTick;
 Stats::Value simFreq;
+Stats::Value simInsts;
+Stats::Value simOps;
+Stats::Value simCPUFreq;
 
 namespace Stats {
 
 Time statTime(true);
+Time statTimeReal(true);
 Tick startTick;
+Counter startOps;
+Counter startInsts;
 
 GlobalEvent *dumpEvent;
 
@@ -77,8 +86,22 @@ struct SimTicksReset : public Callback
 {
     void process()
     {
+        static bool hasSetRealTimer = false;
         statTime.setTimer();
         startTick = curTick();
+        if (!hasSetRealTimer) {
+            statTimeReal.setTimer();
+            hasSetRealTimer = true;
+        }
+    }
+};
+
+struct SimOpsInstsReset : public Callback
+{
+    void process()
+    {
+        startOps = simOps.value();
+        startInsts = simInsts.value();
     }
 };
 
@@ -90,6 +113,16 @@ statElapsedTime()
 
     Time elapsed = now - statTime;
     return elapsed;
+}
+
+double
+statElapsedTimeReal()
+{
+    Time now;
+    now.setTimer();
+
+    Time elapsedReal = now - statTimeReal;
+    return elapsedReal;
 }
 
 Tick
@@ -104,7 +137,21 @@ statFinalTick()
     return curTick();
 }
 
+Counter
+statElapsedInsts()
+{
+    return simInsts.value() - startInsts;
+}
+
+Counter
+statElapsedOps()
+{
+    return simOps.value() - startOps;
+}
+
+
 SimTicksReset simTicksReset;
+SimOpsInstsReset simOpsInstsReset;
 
 struct Global
 {
@@ -113,9 +160,7 @@ struct Global
     Stats::Formula hostTickRate;
     Stats::Value hostMemory;
     Stats::Value hostSeconds;
-
-    Stats::Value simInsts;
-    Stats::Value simOps;
+    Stats::Value hostSecondsReal;
 
     Global();
 };
@@ -137,16 +182,38 @@ Global::Global()
         .precision(0)
         .prereq(simOps)
         ;
+    simInstsNoWarmup
+        .functor(statElapsedInsts)
+        .name("sim_insts_wo_warmup")
+        .desc("Number of instructions simulated without warm up")
+        ;
+
+    simOpsNoWarmup
+        .functor(statElapsedOps)
+        .name("sim_ops_wo_warmup")
+        .desc("Number of ops (including micro ops) without warm up")
+        ;
 
     simSeconds
         .name("sim_seconds")
         .desc("Number of seconds simulated")
         ;
 
+    IPC
+        .name("sim_ipc")
+        .desc("IPC simulated")
+        ;
+
     simFreq
         .scalar(SimClock::Frequency)
         .name("sim_freq")
         .desc("Frequency of simulated ticks")
+        ;
+
+    simCPUFreq
+        .functor(BaseCPU::getCPUClock)
+        .name("sim_CPUfreq")
+        .desc("CPU ticks of one cpu cycle")
         ;
 
     simTicks
@@ -186,6 +253,13 @@ Global::Global()
     hostSeconds
         .functor(statElapsedTime)
         .name("host_seconds")
+        .desc("Real time of simulation part elapsed on the host")
+        .precision(2)
+        ;
+
+    hostSecondsReal
+        .functor(statElapsedTimeReal)
+        .name("host_seconds_real")
         .desc("Real time elapsed on the host")
         .precision(2)
         ;
@@ -197,11 +271,13 @@ Global::Global()
         ;
 
     simSeconds = simTicks / simFreq;
+    IPC = simOps * simCPUFreq / simTicks;
     hostInstRate = simInsts / hostSeconds;
     hostOpRate = simOps / hostSeconds;
     hostTickRate = simTicks / hostSeconds;
 
     registerResetCallback(&simTicksReset);
+    registerResetCallback(&simOpsInstsReset);
 }
 
 void

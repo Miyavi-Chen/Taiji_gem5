@@ -616,6 +616,13 @@ class BaseCPU : public ClockedObject
         return total;
     }
 
+    static Counter getCPUClock()
+    {
+      Counter cpuFreq = 0;
+      cpuFreq = static_cast<Counter>(cpuList[0]->clockPeriod());
+      return cpuFreq;
+    }
+
   public:
     // Number of CPU cycles simulated
     Stats::Scalar numCycles;
