@@ -43,10 +43,11 @@
 #include "sim/stat_control.hh"
 #include "sim/system.hh"
 #include "debug/Drain.hh"
+#include "mem/lru.cc"
 
 #define MISSHITRATIOPCM 8.1
-#define MISSHITRATIODRAM 2.6
-#define RWLATENCYRATIOPCM 4
+#define MISSHITRATIODRAM 3.0
+#define RWLATENCYRATIOPCM 4//for miss
 #define WQABILITYRATIO 3.36
 
 using namespace std;
@@ -1513,7 +1514,7 @@ HybridMem::toChannelAddr(class Page *page, struct ChannelIdx idx, PacketPtr pkt)
     return page->getFrameAddr(idx).val + (pkt->getAddr() % granularity);
 }
 
-struct HybridMem::ChannelIdx
+ChannelIdx
 HybridMem::selectChannelIdx(class Page *page)
 {
     std::vector<struct ChannelIdx> channelIdxSet;
@@ -1529,7 +1530,7 @@ HybridMem::selectChannelIdx(class Page *page)
     return channelIdxSet[select];
 }
 
-struct HybridMem::ChannelIdx
+ChannelIdx
 HybridMem::selectChannelIdxFun(class Page *page)
 {
     std::vector<struct ChannelIdx> channelIdxSet;
@@ -1545,7 +1546,7 @@ HybridMem::selectChannelIdxFun(class Page *page)
     return channelIdxSet[select];
 }
 
-struct HybridMem::ChannelIdx
+ChannelIdx
 HybridMem::toChannelIdx(size_t i) const
 {
     struct ChannelIdx ret;
@@ -1553,7 +1554,7 @@ HybridMem::toChannelIdx(size_t i) const
     return ret;
 }
 
-struct HybridMem::PhysAddr
+PhysAddr
 HybridMem::toPhysAddr(struct PageAddr addr) const
 {
     struct PhysAddr ret;
@@ -1570,7 +1571,7 @@ HybridMem::toPhysAddr(struct PageAddr addr) const
     return ret;
 }
 
-struct HybridMem::PageAddr
+PageAddr
 HybridMem::toMemAddr(Addr addr) const
 {
     struct PageAddr pageaddr;
@@ -1586,13 +1587,13 @@ HybridMem::toMemAddr(Addr addr) const
     return pageaddr;
 }
 
-struct HybridMem::PhysAddr
+PhysAddr
 HybridMem::toPhysAddr(class Page *page) const
 {
     return toPhysAddr(page->getPageAddr());
 }
 
-struct HybridMem::PageAddr
+PageAddr
 HybridMem::toPageAddr(Addr addr) const
 {
     assert((addr % granularity) == 0);
@@ -1601,7 +1602,7 @@ HybridMem::toPageAddr(Addr addr) const
     return ret;
 }
 
-struct HybridMem::PageAddr
+PageAddr
 HybridMem::toPageAddr(PacketPtr pkt) const
 {
     const Addr begin_addr = pkt->getAddr();
@@ -1613,7 +1614,7 @@ HybridMem::toPageAddr(PacketPtr pkt) const
     return toPageAddr(addr);
 }
 
-struct HybridMem::FrameAddr
+FrameAddr
 HybridMem::toFrameAddrMemSide(Addr _addr) const
 {
     const Addr begin_addr = _addr;
@@ -1622,7 +1623,7 @@ HybridMem::toFrameAddrMemSide(Addr _addr) const
     return toFrameAddr(addr);
 }
 
-struct HybridMem::PageAddr
+PageAddr
 HybridMem::toPageAddrMemSide(Addr _addr) const
 {
     const Addr begin_addr = _addr;
@@ -1631,7 +1632,7 @@ HybridMem::toPageAddrMemSide(Addr _addr) const
     return toPageAddr(addr);
 }
 
-struct HybridMem::FrameAddr
+FrameAddr
 HybridMem::toFrameAddr(Addr addr) const
 {
     assert((addr % granularity) == 0);
@@ -1640,7 +1641,7 @@ HybridMem::toFrameAddr(Addr addr) const
     return ret;
 }
 
-struct HybridMem::FrameAddr
+FrameAddr
 HybridMem::toFrameAddr(PacketPtr pkt) const
 {
     const Addr begin_addr = pkt->getAddr();
@@ -1974,168 +1975,6 @@ HybridMem::addScoreToPage(class Page *page, size_t score)
     return (page->RWScoresPerInterval - pre);
 }
 
-HybridMem::LRU::LRU(int length)
-{
-    head = -1;
-    tail = -1;
-    size = 0;
-    max_size = length;
-
-    member = new node[length];
-    for (int i = 0 ; i < length ; i++) {
-        member[i].hostAddr = std::numeric_limits<Addr>::max();
-        member[i].next = -1;
-        member[i].pre = -1;
-    }
-
-    exist = new bool[length]();
-    for (int i = 0 ; i < length ; i++) {
-        exist[i] = false;
-    }
-}
-
-void
-HybridMem::LRU::reset()
-{
-    head = -1;
-    tail = -1;
-    size = 0;
-
-    for (int i = 0 ; i < max_size ; i++) {
-        exist[i] = false;
-    }
-
-    map_index.clear();
-}
-
-
-bool
-HybridMem::LRU::isEmpty()
-{
-    bool rv = true;
-    for (int i = 0 ; i < max_size ; i++) {
-        if (exist[i]) {
-           rv = false; return rv;
-        }
-
-    }
-
-    return rv;
-}
-
-struct HybridMem::PageAddr
-HybridMem::LRU::put(Addr hostAddr)
-{
-    struct PageAddr pageAddr;
-    if (size == 0)
-        return firstPut(hostAddr);
-
-    auto iter = map_index.find(hostAddr);
-
-    if (iter != map_index.end()) {
-        //find
-        int __index = iter->second;
-        return findInLRU(__index);
-    } else {
-        //not find
-        if (size == max_size) {
-            Addr evict_Addr = member[tail].hostAddr;
-            int pre = member[tail].pre;
-            member[pre].next = -1;
-            member[tail].pre = -1;
-            int n = map_index.erase(evict_Addr);
-            if (n != 1) {
-                printf("LRU error!1\n");
-                exit(-1);
-            }
-
-            member[tail].hostAddr = hostAddr;
-            member[tail].next = head;
-            member[head].pre = tail;
-            map_index[hostAddr] = tail;
-
-            head = tail;
-            tail = pre;
-            pageAddr.val = evict_Addr;
-            return pageAddr;
-        } else {
-            int __index;
-            for (__index = 0 ; __index < max_size ; __index++) {
-                if (exist[__index] == false) {
-                    exist[__index] = true;
-                    break;
-                }
-            }
-            member[__index].hostAddr = hostAddr;
-            map_index[hostAddr] = __index;
-            member[head].pre = __index;
-            member[__index].next = head;
-            member[__index].pre = -1;
-            head = __index;
-            size++;
-            pageAddr.val = std::numeric_limits<Addr>::max();
-            return pageAddr;
-        }
-    }
-}
-
-struct HybridMem::PageAddr
-HybridMem::LRU::firstPut(Addr hostAddr)
-{
-    assert(size == 0);
-
-    struct PageAddr pageAddr;
-    member[size].hostAddr = hostAddr;
-    member[size].pre = -1;
-    member[size].next = -1;
-    map_index[hostAddr] = size;
-    head = size;
-    tail = size;
-    exist[size] = true;
-    size++;
-    pageAddr.val = std::numeric_limits<Addr>::max();
-    return pageAddr;
-}
-
-struct HybridMem::PageAddr
-HybridMem::LRU::findInLRU(int index)
-{
-    struct PageAddr pageAddr;
-    if (index != head) {
-        if (index != tail) {
-            int next = member[index].next;
-            int pre = member[index].pre;
-            member[pre].next = next;
-            member[next].pre = pre;
-            member[index].pre = -1;
-            member[index].next = head;
-            member[head].pre = index;
-            head = index;
-        } else {
-            int pre = member[index].pre;
-            member[pre].next = -1;
-            member[index].pre = -1;
-            member[index].next = head;
-            member[head].pre = index;
-            head = index;
-            tail = pre;
-        }
-    }
-
-    pageAddr.val = std::numeric_limits<Addr>::max();
-    return pageAddr;
-}
-
-void
-HybridMem::LRU::getAllHostPages(std::vector<Addr>& v)
-{
-    for (int i = 0 ; i < max_size ; i++) {
-        if (exist[i] == true) {
-            v.push_back(member[i].hostAddr);
-        }
-    }
-    assert(v.size() == (size_t)size);
-}
 
 void
 HybridMem::resetStats() {

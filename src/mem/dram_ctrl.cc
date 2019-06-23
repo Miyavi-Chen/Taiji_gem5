@@ -1593,8 +1593,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
     if (dram_pkt->masterId() != HybridMemID &&
             (dram_pkt->isRead() || dram_pkt->isWrite())) {
         const Addr mem_addr = dram_pkt->getPhysAddr();
-        struct HybridMem::PageAddr pageAddr =
-                                HybridMemptr->toMemAddr(mem_addr);
+        PageAddr pageAddr = HybridMemptr->toMemAddr(mem_addr);
         HybridMemptr->CountScoreinc(pageAddr, dram_pkt->isRead(), row_hit, dram_pkt->QLen);
     }
 
