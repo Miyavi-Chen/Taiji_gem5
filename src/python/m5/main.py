@@ -410,6 +410,7 @@ def main(*args):
     sys.path = [ os.path.dirname(sys.argv[0]) ] + sys.path
 
     filename = sys.argv[0]
+    print(filename+"\n") # se.py or fs.py abspath
     filedata = open(filename, 'r').read()
     filecode = compile(filedata, filename, 'exec')
     scope = { '__file__' : filename,

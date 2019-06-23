@@ -41,7 +41,7 @@ class CodeImporter(object):
             raise AttributeError("%s already found in importer" % modpath)
 
         self.modules[modpath] = (filename, abspath, code)
-        # print("\n\n"+self.modules[modpath][1]+"\n\n")
+        # print(self.modules[modpath][1])
 
     def find_module(self, fullname, path):
         if fullname in self.modules:

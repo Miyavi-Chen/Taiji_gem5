@@ -44,9 +44,10 @@
 #include "sim/system.hh"
 #include "debug/Drain.hh"
 
-#define MISSHITRATIOPCM 2.1
+#define MISSHITRATIOPCM 8.1
 #define MISSHITRATIODRAM 2.6
 #define RWLATENCYRATIOPCM 4
+#define WQABILITYRATIO 3.36
 
 using namespace std;
 using namespace Data;
@@ -89,7 +90,7 @@ HybridMem::HybridMem(const HybridMemParams* p)
       DValueMax(1024), infDramMax(DValueMax), infPcmMax(DValueMax),
       refPagePerIntervalnum(0), refPageinDramPerIntervalnum(0),
       refPageinPcmPerIntervalnum(0), reqInDramCount(0), reqInPcmCount(0),
-      reqInDramCountPI(0), MigrationTimeStartAt(0),
+      reqInDramCountPI(0), MigrationTimeStartAt(0), bootUpTick(0),
       prevArrival(0), reqsPI(0), totGapPI(0),
       avgGapPI(0), totBlockedreqMemAccLatPI(0),
       totBlockedreqMemAccLatWDelayPI(0), blockedreqThisInterval(0)
@@ -188,6 +189,9 @@ HybridMem::init()
 void
 HybridMem::startup()
 {
+    bootUpTick = curTick();
+    std::cout<<"boot up at " <<bootUpTick<<"\n";
+
     if (!FullSystem) {
         schedule(warmUpEvent, curTick() + timeWarmup);
         std::cout<<"Schedule warmUpEvent when start up \n";
@@ -201,7 +205,7 @@ void
 HybridMem::processWarmUpEvent()
 {
 
-    std::cout<<" HybridMem Warm up at"<<curTick()<<std::endl;
+    std::cout<<"HybridMem Warm up at "<<curTick()<<std::endl;
 
     for (int i = 0; i < channelRanges.size(); ++i) {
         ctrlptrs[i]->resetAllStats();
@@ -233,7 +237,7 @@ HybridMem::statisticInfoCheck()
         blockedreqThisInterval -= reqBlockedTickDiff.size();
         reqBlockedTickDiff.clear();
     }
-    avgGapPI =totGapPI / reqsPI;
+    avgGapPI = reqsPI == 0 ? 0 : totGapPI / reqsPI;
     if (blockedreqThisInterval) {
         std::cout<<"blockedreqThisInterval "<<blockedreqThisInterval<<"\n";
         std::cout<<"Lat_o: "<<totBlockedreqMemAccLatPI
@@ -277,10 +281,6 @@ HybridMem::processRegularBalancedEvent()
         ++balanceCount;
         std::cout<<"Balanced"<<"\n";
         resetPerInterval();
-        // if (!hasWarmedUp) {
-        //     hasWarmedUp = true;
-        //     schedule(warmUpEvent, curTick() + timeWarmup);
-        // }
         return;
     }
     ++unbalanceCount;
@@ -498,11 +498,12 @@ HybridMem::genMigrationTasks(size_t &migrationPageNum, bool pcm2dram)
 {
     assert(migrationPageNum <= maxMigrationTasks);
     if (pcm2dram) {
-        if (pools.poolOf(cacheMem_id)->getFreeFrameSize() <
-                migrationPageNum) {
+        if (pools.poolOf(cacheMem_id)->getFreeFrameSize() <=
+                maxMigrationTasks) {
             migrationPageNum /= 2;
-            genDramMigrationTasks(migrationPageNum);
-            std::cout<<"genDramEvictedMigrationTasks "<<migrationPageNum<<"\n";
+            size_t evictedPageNum = maxMigrationTasks/2;
+            genDramEvictedMigrationTasks(evictedPageNum);
+            std::cout<<"genDramEvictedMigrationTasks "<<evictedPageNum<<"\n";
         }
 
         genPcmMigrationTasks(migrationPageNum);
@@ -563,37 +564,38 @@ HybridMem::resetPages()
 void
 HybridMem::genDramEvictedMigrationTasks(size_t &halfMigrationPageNum)
 {
-    if (DramLFUDA.capacity() == 0) {
-        std::cout<<"DramLFUDA is empty\n";
-        halfMigrationPageNum = 0;
-        return;
-    }
     int pageCacheCount = 0;
     size_t migrationCount = 0;
-    for (int i = Ranking.size() - 1;
-        i >=int(Ranking.size() - halfMigrationPageNum); --i) {
-        migrationCount++;
-        Addr host_PN = Ranking[i].host_PN;
-        struct PageAddr pageAddr = {host_PN};
-        class Page *page = pages.pageOf(pageAddr);
-        assert(page->isValid(cacheMem_id));
-        assert(migrationPages.find(host_PN)!=migrationPages.end());
-        migrationPages.erase(host_PN);
-        if (page->isPageCache) {++pageCacheCount;}
-
-        if (migrationPagesPI.find(host_PN)!=migrationPagesPI.end())
-            migrationPagesPI.erase(host_PN);
-        // struct FrameAddr frame_addr = page->getPossession();
-
-        if (page->isInvalid(mainMem_id) || page->isUnused(mainMem_id)) {
-            assert(tryIssueMigrationTask(page, cacheMem_id, mainMem_id));
-        } else{
-            //nothing to do
+    class FramePool *pool = pools.poolOf(cacheMem_id);
+    for (int i = 0; i < halfMigrationPageNum; ++i) {
+        bool finishPickpage = false;
+        struct FrameAddr frameAddr = {std::numeric_limits<Addr>::max()};
+        struct PageAddr pageAddr = {std::numeric_limits<Addr>::max()};
+        while (!finishPickpage) {
+            frameAddr = pool->pickOneEvictedFrame();
+            pageAddr = {pool->getOwner(frameAddr).val};
+            finishPickpage = !(DramLFUDA.findAddr(pageAddr.val));
         }
 
-        page->freeFrame(cacheMem_id);
+        class Page *page = pages.pageOf(pageAddr);
+        if (page->isInvalid(mainMem_id) || page->isUnused(mainMem_id)) {
+            assert(tryIssueMigrationTask(page, cacheMem_id, mainMem_id));
+            assert(migrationPages.find(pageAddr.val) != migrationPages.end());
+            migrationPages.erase(pageAddr.val);
+        } else {
+            page->freeFrame(cacheMem_id);
+        }
+
+
+
+        if (page->isPageCache) {++pageCacheCount;}
+
+        if (migrationPagesPI.find(pageAddr.val)!=migrationPagesPI.end())
+            migrationPagesPI.erase(pageAddr.val);
+
         page->isInDram = false;
         page->claimChannelIsValid(mainMem_id);
+        ++migrationCount;
     }
     halfMigrationPageNum = migrationCount;
     // std::cout<< "Page cache count: "<< pageCacheCount<<"\n";
@@ -615,7 +617,6 @@ HybridMem::genPcmMigrationTasks(size_t &migrationPageNum)
         if (migrationTasks.size() >= maxMigrationTasks) {
             break;
         }
-        ++migrationCount;
         Addr host_PN = PcmLFUDA.lfuNodes[cur].hostAddr;
         assert(cur != -1);
         cur = PcmLFUDA.lfuNodes[cur].next;
@@ -628,7 +629,9 @@ HybridMem::genPcmMigrationTasks(size_t &migrationPageNum)
 
         if (page->isInvalid(cacheMem_id) || page->isUnused(cacheMem_id)) {
             struct FrameAddr frame_addr;
-            assert(pools.poolOf(cacheMem_id)->tryGetAnyFreeFrame(&frame_addr));
+            if(!pools.poolOf(cacheMem_id)->tryGetAnyFreeFrame(&frame_addr)) {
+                break;
+            }
             if (page->isInvalid(cacheMem_id))
                 page->freeFrame(cacheMem_id);
             page->allocFrame(cacheMem_id, frame_addr);
@@ -637,6 +640,7 @@ HybridMem::genPcmMigrationTasks(size_t &migrationPageNum)
         } else {
             //nothing to do
         }
+        ++migrationCount;
         page->isInDram = true;
         page->claimChannelIsValid(cacheMem_id);
     }
@@ -682,19 +686,54 @@ HybridMem::genDramMigrationTasks(size_t &migrationPageNum)
             //nothing to do
         }
 
-        if (pools.poolOf(cacheMem_id)->getFreeFrameSize() < maxMigrationTasks)
-            page->freeFrame(cacheMem_id);
-
         page->isInDram = false;
         page->claimChannelIsValid(mainMem_id);
     }
     migrationPageNum = migrationCount;
     // std::cout<< "Page cache count: "<< pageCacheCount<<"\n";
 }
+
+void
+HybridMem::handlePFDMA(class Page * page, PacketPtr pkt)
+{
+    assert(pkt->masterId() == dmaDeviceId);
+    if (pkt->isWrite() && !page->isDirty
+        && page->readcount == 0 && page->writecount == 0) {
+        updateBWInfo();
+        page->isPageCache = true;
+
+        if (WQABILITYRATIO * ctrlptrs[mainMem_id.val]->totalWriteQueueSize >=
+                ctrlptrs[cacheMem_id.val]->totalWriteQueueSize) {
+            //3.36* avgWrBWPCM > avgWrBWDRAM
+            assert(page->isUnused(cacheMem_id));
+            struct FrameAddr frameAddr;
+            if (pools.poolOf(cacheMem_id)->tryGetAnyFreeFrame(&frameAddr)) {
+                if (page->isInvalid(cacheMem_id)) {
+                    page->freeFrame(cacheMem_id);
+                }
+                page->allocFrame(cacheMem_id, frameAddr);
+                assert(tryIssueMigrationTask(page, mainMem_id, cacheMem_id));
+                page->isInDram = true;
+            } else {
+                //nothing to do
+            }
+
+        }
+        page->writecount = page->readcount = -64;
+
+        if (!warmUpEvent.scheduled()) {
+            schedule(warmUpEvent, curTick() + timeWarmup);
+        } else {
+            reschedule(warmUpEvent, curTick() + timeWarmup);
+        }
+    }
+}
+
+
 void
 HybridMem::reqBlockedTickDiffUpdate()
 {
-    blockedreqThisInterval =
+    blockedreqThisInterval = avgGapPI == 0 ? 0:
                 (curTick() - MigrationTimeStartAt) / avgGapPI;
     totBlockedReqsForMigration += blockedreqThisInterval;
     for (int i = 0; i < blockedreqThisInterval; ++i) {
@@ -836,7 +875,7 @@ HybridMem::tryIssueMigrationTask(class Page *page,
         ++badMigrationPageCount;
     }
 
-    if (sys->isTimingMode()) {
+    if (sys->isTimingMode() && !page->isPageCache) {
         if (false) {
             assert(0);
         } else if (wait == WaitState::wNONE) {
@@ -976,34 +1015,8 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         }
     }
 
-    if (pkt->masterId() == dmaDeviceId && isWrite && !page->isDirty
-        && page->readcount == 0 && page->writecount == 0) {
-        updateBWInfo();
+    if (pkt->masterId() == dmaDeviceId) {handlePFDMA(page, pkt);}
 
-        // if (3.36*ctrlptrs[mainMem_id.val]->totalWriteQueueSize >= ctrlptrs[cacheMem_id.val]->totalWriteQueueSize) {
-        //     //3.36* avgWrBWPCM > avgWrBWDRAM
-        //     if (page->isUnused(cacheMem_id)) {
-        //         struct FrameAddr frame_addr;
-        //         assert(pools.poolOf(cacheMem_id)->tryGetAnyFreeFrame(&frame_addr));
-        //         if (page->isInvalid(cacheMem_id))
-        //             page->freeFrame(cacheMem_id);
-        //         page->allocFrame(cacheMem_id, frame_addr);
-        //         // assert(tryIssueMigrationTask(page, mainMem_id, cacheMem_id));
-
-        //     } else {
-        //         //nothing to do
-        //     }
-        //     page->isInDram = true;
-        //     page->claimChannelIsValid(cacheMem_id);
-        // }
-        if (!warmUpEvent.scheduled()) {
-            schedule(warmUpEvent, curTick() + timeWarmup);
-        } else {
-            reschedule(warmUpEvent, curTick() + timeWarmup);
-        }
-        page->isPageCache = true;
-        page->writecount = page->readcount = -64;
-    }
 
     Tick releaseSentStateTick = clockEdge(Cycles(1));
     releaseSentStateTick += (pkt->hasData()) ?
@@ -1255,7 +1268,7 @@ HybridMem::recvFunctionalMigrationResp(PacketPtr pkt)
         migrationTasks.erase(it);
         delete task;
 
-        trySendRetry();
+        // trySendRetry();
     }
 }
 
@@ -1290,8 +1303,14 @@ HybridMem::recvTimingMigrationResp(PacketPtr pkt)
         }
         assert(it != migrationTasks.end());
         migrationTasks.erase(it);
+
+        if (task->targetChannel().val == mainMem_id.val &&
+            pools.poolOf(cacheMem_id)->getFreeFrameSize() <=maxMigrationTasks) {
+            page->freeFrame(cacheMem_id);
+        }
+
         delete task;
-        // std::cout<<"migrationTasks size: "<<migrationTasks.end()-migrationTasks.begin()<<"\n";
+
         if (migrationTasks.end()-migrationTasks.begin() == 0) {
             totMemMigrationTime += curTick() - MigrationTimeStartAt;
             reqBlockedTickDiffUpdate();
@@ -1805,10 +1824,18 @@ HybridMem::CountScoreinc(struct PageAddr pageaddr, bool isRead, bool hit, uint64
             else
                 dramScore += addScoreToPage(page, 3);
     } else {
-        if (hit)
+        if (isRead) {
+            if (hit)
                 pcmScore += addScoreToPage(page, 1);
             else
-                pcmScore += addScoreToPage(page, 2);
+                pcmScore += addScoreToPage(page, 7);
+        } else {
+            if (hit)
+                pcmScore += addScoreToPage(page, 1);
+            else
+                pcmScore += addScoreToPage(page, 8);
+        }
+
     }
 }
 
@@ -1835,11 +1862,11 @@ HybridMem::ReadCountinc(class Page *page, uint64_t qlen)
     if (page->isPageCache && (page->readcount < 0 || page->writecount < 0)) {
         return;
     }
-    if (page->isInDram) {
-        if ((double)qlen > avgRdQLenDRAM) {return;}
-    } else {
-        if ((double)qlen < avgRdQLenPCM/2) {return;}
-    }
+    // if (page->isInDram) {
+    //     if ((double)qlen > avgRdQLenDRAM) {return;}
+    // } else {
+    //     if ((double)qlen < avgRdQLenPCM/2) {return;}
+    // }
 
 
     struct PageAddr evictPN;
@@ -1889,11 +1916,11 @@ HybridMem::WriteCountinc(class Page *page, uint64_t qlen)
         return;
     }
 
-    if (page->isInDram) {
-        if (qlen > 32) {return;}
-    } else {
-        if (qlen <= 32) {return;}
-    }
+    // if (page->isInDram) {
+    //     if (qlen > 32) {return;}
+    // } else {
+    //     if (qlen <= 32) {return;}
+    // }
 
     struct PageAddr evictPN;
     if (page->isInDram) {
@@ -2118,7 +2145,7 @@ HybridMem::resetStats() {
     unbalanceCount = 0;
     rightRatioSum = 0;
     totMemMigrationTime = 0;
-    lastWarmupAt =curTick();
+    lastWarmupAt =curTick() - bootUpTick;
 }
 
 void

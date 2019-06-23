@@ -240,7 +240,7 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
 
     if (enableBinAware) {
         pageCounts = capacity / system()->getPageBytes();
-        rowsPerBin = rowsPerBank / TOTALBINS;
+        rowsPerBin = rowsPerBank * banksPerRank / TOTALBINS;
         pagesPerRow = rowBufferSize / system()->getPageBytes();
         pagesPerBin = rowsPerBin * pagesPerRow;
 

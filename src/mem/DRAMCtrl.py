@@ -702,14 +702,14 @@ class DDR4_2400_8G_8x8(DDR4_2400_16x4):
     enable_bin_aware = True
 
      # size of device
-    device_size = '1GB'
+    device_size ='1GB'#'64kB' #'1GB'
 
     ranks_per_channel = 1
     # 8x8 configuration, 8 devices each with an 8-bit interface
     device_bus_width = 8
 
     # Each device has a page (row buffer) size of 1 Kbyte (1K columns x8)
-    device_rowbuffer_size = '1kB'
+    device_rowbuffer_size = '1kB'#'512B'#'1kB'
 
     # 8x8 configuration, so 8 devices
     devices_per_rank = 8
@@ -744,7 +744,7 @@ class DDR4_2400_4x16(DDR4_2400_16x4):
     qos_policy = QoSFixedPriorityPolicy()
     # qos_policy.setMasterPriority("hybrid_mem", 1)
 
-    # enable_bin_aware = True
+    enable_bin_aware = True
     # 4x16 configuration, 4 devices each with an 16-bit interface
     device_bus_width = 16
 
@@ -1377,7 +1377,7 @@ class PCM_LPDDR2_400_8x8(DRAMCtrl):
 
     VDD = '1.8V'
 
-class PCM_LPDDR2_4G_400_16x4(PCM_LPDDR2_400_8x8):
+class PCM_LPDDR2_4G_400_8x8(PCM_LPDDR2_400_8x8):
     # size of device
     device_size = '512MB'
 
@@ -1386,7 +1386,7 @@ class PCM_LPDDR2_4G_400_16x4(PCM_LPDDR2_400_8x8):
     burst_length = 8
     # Each device has a page (row buffer) size of 1KB
     device_rowbuffer_size = '1kB'
-    # 16x4 configuration, so 16 device
+    # 8x8 configuration, so 8 device
     devices_per_rank = 8
     ranks_per_channel = 1
 
@@ -1404,25 +1404,23 @@ class PCM_LPDDR2_8G_400_16x4(PCM_LPDDR2_400_8x8):
     qos_policy = QoSFixedPriorityPolicy()
     # qos_policy.setMasterPriority("hybrid_mem", 1)
 
-
-
     # size of device
-    device_size = '1024MB'
+    device_size = '512MB'
 
     tRCD = '28ns'
     tWP = '150ns'
     tCL = '15ns'
 
     # 16x4 configuration, 1 device with a 4-bit interface
-    device_bus_width = 8
+    device_bus_width = 4
     burst_length = 8
     # Each device has a page (row buffer) size of 1KB
     device_rowbuffer_size = '1kB'
     # 16x4 configuration, so 16 device
-    devices_per_rank = 8
+    devices_per_rank = 16
     ranks_per_channel = 1
 
-    banks_per_rank = 16
+    banks_per_rank = 8
 
     write_buffer_size = 64
     read_buffer_size = 64
@@ -1439,8 +1437,6 @@ class PCM_DDR2_16G_400_16x4(PCM_LPDDR2_8G_400_16x4):
     ranks_per_channel = 2
 
 class PCM_DDR2_32G_400_16x4(PCM_LPDDR2_8G_400_16x4):
-    ranks_per_channel = 2
-class PCM_LPDDR2_32G_400_16x4(PCM_LPDDR2_400_8x8):
     # size of device
     device_size = '1024MB'
 

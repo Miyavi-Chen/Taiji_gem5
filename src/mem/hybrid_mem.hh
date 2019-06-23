@@ -169,7 +169,7 @@ class HybridMem : public ClockedObject
         std::vector<bool> allocatedPagesPerBin;
     };
 
-    class BinsOfRank//TBD
+    class BinsOfRank
     {
       public:
         BinsOfRank(uint64_t _pagesPerBin)
@@ -187,8 +187,8 @@ class HybridMem : public ClockedObject
             if (!bins[i].isFull()) {
               int idx = bins[i].firstFreeFrame();
               assert(idx != -1);
-              std::cout<<"BinsOfRank get bin "<<i<<" ";
-              std::cout<<"get idx "<<idx<<"\n";
+              // std::cout<<"BinsOfRank get bin "<<i<<" ";
+              // std::cout<<"get idx "<<idx<<"\n";
               return static_cast<size_t>(idx + i * pagesPerBin);
             }
           }
@@ -213,7 +213,7 @@ class HybridMem : public ClockedObject
         {
           bins[binNum].binReset(idx);
           if (nextFreeBin > binNum) {
-            std::cout<<"Free bin change from"<<nextFreeBin<<" "<<binNum<<"\n";
+            std::cout<<"Free bin change from "<<nextFreeBin<<" "<<binNum<<"\n";
             nextFreeBin = binNum;
           }
         }
@@ -237,6 +237,7 @@ class HybridMem : public ClockedObject
           for (int i=0; i < ranksPerChannel; ++i) {
             binsInRanks.push_back(BinsOfRank(pagesPerBin));
           }
+          std::cout<<"\nInit BinsInRanks\n";
         }
 
         size_t getFreeFrame ()
@@ -265,8 +266,8 @@ class HybridMem : public ClockedObject
           size_t idx = pageNumOfRank % pagesPerBin;
           binsInRanks[rank].allocFrame(binNum, idx);
           updateCtrlRefTable(rank, binNum);
-          std::cout<<"BinsOfRank alloc bin "<<binNum<<" ";
-          std::cout<<"alloc idx "<<idx<<"\n";
+          // std::cout<<"BinsOfRank alloc bin "<<binNum<<" ";
+          // std::cout<<"alloc idx "<<idx<<"\n";
         }
 
         void releaseFrame (size_t frameNum)
@@ -278,7 +279,7 @@ class HybridMem : public ClockedObject
           binsInRanks[rank].releaseFrame(binNum, idx);
           updateCtrlRefTable(rank, binNum);
           std::cout<<"BinsOfRank free bin "<<binNum<<" ";
-          std::cout<<"free idx "<<idx<<"\n";
+          std::cout<<"idx "<<idx<<"\n";
         }
 
         void updateCtrlRefTable (size_t rank, size_t binNum)
@@ -358,6 +359,7 @@ class HybridMem : public ClockedObject
           : RANGE(_range), FRAME_SIZE(_frameSize),
             frames(RANGE.size() / FRAME_SIZE),
             poolEmpty(false), poolUsed(false), nextTimeFrameIdx(0),
+            nextEvictedFrameIdx(0),
             freeFrameSize(frames.size()), isDram(false), BinsInRanksPtr(nullptr)
         { }
 
@@ -394,6 +396,21 @@ class HybridMem : public ClockedObject
 
           poolEmpty = true;
           return false;
+        }
+
+        struct FrameAddr pickOneEvictedFrame()
+        {
+          struct FrameAddr _frame = {std::numeric_limits<Addr>::max()};
+          for (size_t i = 0; i < frames.size(); ++i) {
+            size_t idx = ((nextEvictedFrameIdx + i) % frames.size());
+            if (!frames[idx].isFree()) {
+              _frame.val = (idx * FRAME_SIZE) + RANGE.start();
+              nextEvictedFrameIdx = ((idx + 1) % frames.size());
+              return _frame;
+            }
+          }
+          assert(_frame.val != std::numeric_limits<Addr>::max());
+          return _frame;
         }
 
         void allocFrame(struct PageAddr _owner, struct FrameAddr _frame)
@@ -451,6 +468,7 @@ class HybridMem : public ClockedObject
         bool poolEmpty;
         bool poolUsed;
         size_t nextTimeFrameIdx;
+        size_t nextEvictedFrameIdx;
         size_t freeFrameSize;
         bool isDram;
         BinsInRanks *BinsInRanksPtr;
@@ -1008,6 +1026,11 @@ class HybridMem : public ClockedObject
           }
         }
 
+        struct ChannelIdx targetChannel()
+        {
+          return to;
+        }
+
         ~MigrationTask()
         {
           assert(!ongoingRd);
@@ -1367,6 +1390,18 @@ class HybridMem : public ClockedObject
         }
         bool isEmpty() {return size == 0;}
         int capacity() {return size;}
+        bool findAddr(Addr addr)
+        {
+          bool ret = false;
+          for (int i = 0, cur = head; i < size; ++i, cur = lfuNodes[cur].next) {
+            if (lfuNodes[cur].hostAddr == addr) {
+              ret = true;
+              break;
+            }
+          }
+          return ret;
+        }
+
         void printLFU()
         {
           for (int i = 0, cur = head; i < size; ++i, cur = lfuNodes[cur].next) {
@@ -1599,6 +1634,7 @@ class HybridMem : public ClockedObject
     void genDramEvictedMigrationTasks(size_t &halfMigrationPageNum);
     void genPcmMigrationTasks(size_t &migrationPageNum);
     void genDramMigrationTasks(size_t &migrationPageNum);
+    void handlePFDMA(class Page * page, PacketPtr pkt);
 
     void predicRowHitOrMiss(class Page * page);
 
@@ -1679,6 +1715,7 @@ class HybridMem : public ClockedObject
     Stats::Scalar totMemMigrationTime;
     Stats::Scalar totBlockedReqsForMigration;
 
+    Tick bootUpTick;
     Stats::Scalar lastWarmupAt;
     Stats::Scalar badMigrationPageCount;
     Stats::Scalar migrationPageCount;
