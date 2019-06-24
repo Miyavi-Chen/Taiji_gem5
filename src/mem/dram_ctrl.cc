@@ -722,8 +722,9 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
         unsigned size = std::min((addr | (burstSize - 1)) + 1,
                         pkt->getAddr() + pkt->getSize()) - addr;
         readPktSize[ceilLog2(size)]++;
-        readBursts++;
+        // readBursts++;
         if (pkt->masterId() != HybridMemID) {
+            readBursts++;
             readBurstsPI++;
         }
         masterReadAccesses[pkt->masterId()]++;
@@ -786,8 +787,13 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 
             // Update stats
             // avgRdQLen = totalReadQueueSize + respQueue.size();
-            avgRdQLen = readQueueSizes[1];
-            avgRdQLenPI = readQueueSizes[1];
+            if (pkt->masterId() != HybridMemID) {
+                avgRdQLen = readQueueSizes[0];
+                avgRdQLenPI = readQueueSizes[0];
+            } else {
+                std::cout<<::flush;
+            }
+
 
             auto rdQLen = totalReadQueueSize + respQueue.size();
             assert(((lastRdQLen > rdQLen) && ((lastRdQLen - rdQLen) == 1)) ||
@@ -835,8 +841,9 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
         unsigned size = std::min((addr | (burstSize - 1)) + 1,
                         pkt->getAddr() + pkt->getSize()) - addr;
         writePktSize[ceilLog2(size)]++;
-        writeBursts++;
+        // writeBursts++;
         if (pkt->masterId() != HybridMemID) {
+            writeBursts++;
             writeBurstsPI++;
         }
         masterWriteAccesses[pkt->masterId()]++;
@@ -866,8 +873,13 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
             assert(totalWriteQueueSize == isInWriteQueue.size());
 
             // Update stats
-            avgWrQLen = totalWriteQueueSize;
-            avgWrQLenPI = writeQueueSizes[1];
+            if (pkt->masterId() != HybridMemID) {
+                avgWrQLen = totalWriteQueueSize;
+                avgWrQLenPI = writeQueueSizes[0];
+            } else {
+                std::cout<<::flush;
+            }
+
 
             auto wrQLen = totalWriteQueueSize;
             assert(((lastWrQLen > wrQLen) && ((lastWrQLen - wrQLen) == 1)) ||
@@ -1640,7 +1652,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
                     // Need to also take bus turnaround delays into account
                     dly_to_rd_cmd = dram_pkt->isRead() ? tBURST : wrToRdDly;
                     dly_to_wr_cmd = dram_pkt->isRead() ? rdToWrDly : tBURST;
-                    if (dram_pkt->isWrite() &&
+                    if (dram_pkt->bank == i && dram_pkt->isWrite() &&
                         memCellScheme == Enums::NvmWriteThrough) {
                         dly_to_rd_cmd += tWP;
                         dly_to_wr_cmd += tWP;
@@ -1785,8 +1797,9 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         perBankRdBursts[dram_pkt->bankId]++;
 
         // Update latency stats
-        totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+        // totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
         if (dram_pkt->masterId() != HybridMemID) {
+            totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
             totMemAccLatPI += dram_pkt->readyTime - dram_pkt->entryTime;
         } else {
             totMemAccLatMigration += dram_pkt->readyTime - dram_pkt->entryTime;
@@ -2413,12 +2426,13 @@ void
 DRAMCtrl::Rank::processRefreshEvent()
 {
     //skip refresh if count of bin refreshed this time is 0
-    if(memory.enableBinAware && !memory.binsNeedREF->at(rank)->at(nextREFBin)) {
+    if (memory.enableBinAware && refreshState == REF_IDLE
+            && !memory.binsNeedREF->at(rank)->at(nextREFBin)) {
         tmpREFState = refreshState;
         refreshState = REF_PASS;
     }
 
-    if(refreshState == REF_PASS) {
+    if (refreshState == REF_PASS) {
         refreshState = tmpREFState;
         tmpREFState = REF_IDLE;
         // std::cout<<"Skip Ref at Bin: "<<nextREFBin<<"\n";
@@ -2433,7 +2447,7 @@ DRAMCtrl::Rank::processRefreshEvent()
             reschedule(refreshEvent, refreshDueAt);
 
         return;
-    }else {
+    } else {
         //nothing
     }
 

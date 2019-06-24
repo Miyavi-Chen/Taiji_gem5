@@ -17,7 +17,7 @@ class LRU
 
 	LRU(int);
 
-	std::map<Addr, int> map_index;
+	std::map<Addr, int> mapIndex;
 	int head;
 	int tail;
 	int size;
@@ -39,7 +39,7 @@ class LRU
 	void getAllHostPages(std::vector<Addr>&);
 
 	void reset();
-
+	void erase(Addr);//migration
 	bool isEmpty();
 
 };

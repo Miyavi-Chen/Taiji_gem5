@@ -363,6 +363,8 @@ class HybridMem : public ClockedObject
           BinsInRanksPtr = _BinsInRanksPtr;
         }
 
+        bool isFull() {return poolEmpty;}
+
         bool tryGetAnyFreeFrame(struct FrameAddr *_frame)
         {
           _frame->val = std::numeric_limits<Addr>::max();
@@ -598,9 +600,10 @@ class HybridMem : public ClockedObject
           pageAddr.val = std::numeric_limits<Addr>::max();
 
           readcount = writecount = migrationCount = 0;
-          isDirty = isInDram = isPageCache = false;
+          RowBufferMiss = 0;
+          justMigrate = isDirty = isInDram = isPageCache = false;
           migrationIntervalTotal = lastMigrationInterval = 0;
-          RWScoresPerInterval = dirty_num = 0;
+          RWScoresPerInterval = 0;
           predictRowHit = predictRowMiss = lastAccessTick = 0;
           readreqPerInterval = writereqPerInterval = 0;
           lastAccessInterval = 0;
@@ -608,6 +611,8 @@ class HybridMem : public ClockedObject
 
         int readcount;
         int writecount;
+        int RowBufferMiss;
+        bool justMigrate;
         bool isDirty;
         bool isInDram;
         bool isPageCache;
@@ -619,8 +624,6 @@ class HybridMem : public ClockedObject
 
         //score include read and write
         size_t RWScoresPerInterval;
-        //only write
-        size_t dirty_num;
 
         std::vector<Tick> access_tick;
         size_t predictRowHit;
@@ -797,8 +800,9 @@ class HybridMem : public ClockedObject
 
           //score include read and write
           RWScoresPerInterval = 0;
-          //only write
-          dirty_num = 0;
+
+          justMigrate = false;
+          RowBufferMiss = 0;
 
           predictRowHit = 0;
           predictRowMiss = 0;
@@ -807,9 +811,6 @@ class HybridMem : public ClockedObject
           writereqPerInterval = 0;
 
           lastAccessTick = 0;
-
-          readreqPerInterval = 0;
-          writereqPerInterval = 0;
         }
 
       private:
@@ -1193,14 +1194,14 @@ class HybridMem : public ClockedObject
      */
     std::vector<AddrRange> channelRanges;
 
-    LFUDA DramLFUDA;
-    LFUDA PcmLFUDA;
+    // LFUDA DramLFUDA;
+    // LFUDA PcmLFUDA;
     // LFU DramLFU;
     // LFU PcmLFU;
 
     std::unordered_set<Addr> mapRef;
-    LRU rankingDramLRU;
-    LRU rankingPcmLRU;
+    // LRU rankingDramLRU;
+    // LRU rankingPcmLRU;
 
     class SortHostPage
     {
@@ -1350,11 +1351,10 @@ class HybridMem : public ClockedObject
     static bool PCMtoDRAMsort(const SortHostPage& a, const SortHostPage& b);
     static bool DRAMtoPCMsort(const SortHostPage& a, const SortHostPage& b);
 
-    void getMigrationPageNum(size_t& , double DRAM_latency, double PCM_latency);
-    void genMigrationTasks(size_t &migrationPageNum, bool pcm2dram);
+    void genMigrationTasks(class Page * page, bool pcm2dram);
     void genDramEvictedMigrationTasks(size_t &halfMigrationPageNum);
-    void genPcmMigrationTasks(size_t &migrationPageNum);
-    void genDramMigrationTasks(size_t &migrationPageNum);
+    void genPcmMigrationTasks(class Page * page);
+    void genDramMigrationTasks(class Page * page);
     void handlePFDMA(class Page * page, PacketPtr pkt);
 
     void predicRowHitOrMiss(class Page * page);
@@ -1366,6 +1366,10 @@ class HybridMem : public ClockedObject
 
     void statisticInfoCheck();
     void reqBlockedTickDiffUpdate();
+
+    void incMissThres();
+    void decMissThres();
+    void incRowBufferMissCount(struct PageAddr pageaddr, size_t value);
 
     void processWarmUpEvent();
     EventFunctionWrapper warmUpEvent;
@@ -1421,6 +1425,14 @@ class HybridMem : public ClockedObject
     uint64_t reqInPcmCount;
     uint64_t reqInDramCountPI;
 
+		LRU statsStore;
+    int MissThreshold;
+		int numMigrate;
+		int numReadDram;
+		int numWriteDram;
+		int64_t preBenefit;
+		bool dirMissThreshold;
+
 
     // All statistics that the model needs to capture
     Stats::Scalar readReqs;
@@ -1440,6 +1452,8 @@ class HybridMem : public ClockedObject
     Stats::Scalar lastWarmupAt;
     Stats::Scalar badMigrationPageCount;
     Stats::Scalar migrationPageCount;
+    Stats::Scalar migrationPageCount2DRAM;
+    Stats::Scalar migrationPageCount2PCM;
     Stats::Scalar totBlockedreqMemAccLat;
     Stats::Scalar totBlockedreqMemAccLatWDelay;
 
