@@ -699,7 +699,7 @@ class DDR4_2400_8G_8x8(DDR4_2400_16x4):
     # QoS scheduler policy: tags request with QoS priority value
     qos_policy = QoSFixedPriorityPolicy()
 
-    enable_bin_aware = True
+    # enable_bin_aware = True
 
      # size of device
     device_size ='1GB'#'64kB' #'1GB'
@@ -744,7 +744,7 @@ class DDR4_2400_4x16(DDR4_2400_16x4):
     qos_policy = QoSFixedPriorityPolicy()
     # qos_policy.setMasterPriority("hybrid_mem", 1)
 
-    enable_bin_aware = True
+    # enable_bin_aware = True
     # 4x16 configuration, 4 devices each with an 16-bit interface
     device_bus_width = 16
 

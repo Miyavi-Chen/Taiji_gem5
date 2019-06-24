@@ -34,7 +34,7 @@ LRU::reset()
         exist[i] = false;
     }
 
-    map_index.clear();
+    mapIndex.clear();
 }
 
 
@@ -59,9 +59,9 @@ LRU::put(Addr hostAddr)
     if (size == 0)
         return firstPut(hostAddr);
 
-    auto iter = map_index.find(hostAddr);
+    auto iter = mapIndex.find(hostAddr);
 
-    if (iter != map_index.end()) {
+    if (iter != mapIndex.end()) {
         //find
         int __index = iter->second;
         return findInLRU(__index);
@@ -72,7 +72,7 @@ LRU::put(Addr hostAddr)
             int pre = member[tail].pre;
             member[pre].next = -1;
             member[tail].pre = -1;
-            int n = map_index.erase(evict_Addr);
+            int n = mapIndex.erase(evict_Addr);
             if (n != 1) {
                 printf("LRU error!1\n");
                 exit(-1);
@@ -81,7 +81,7 @@ LRU::put(Addr hostAddr)
             member[tail].hostAddr = hostAddr;
             member[tail].next = head;
             member[head].pre = tail;
-            map_index[hostAddr] = tail;
+            mapIndex[hostAddr] = tail;
 
             head = tail;
             tail = pre;
@@ -96,7 +96,7 @@ LRU::put(Addr hostAddr)
                 }
             }
             member[__index].hostAddr = hostAddr;
-            map_index[hostAddr] = __index;
+            mapIndex[hostAddr] = __index;
             member[head].pre = __index;
             member[__index].next = head;
             member[__index].pre = -1;
@@ -117,7 +117,7 @@ LRU::firstPut(Addr hostAddr)
     member[size].hostAddr = hostAddr;
     member[size].pre = -1;
     member[size].next = -1;
-    map_index[hostAddr] = size;
+    mapIndex[hostAddr] = size;
     head = size;
     tail = size;
     exist[size] = true;
@@ -153,6 +153,60 @@ LRU::findInLRU(int index)
 
     pageAddr.val = std::numeric_limits<Addr>::max();
     return pageAddr;
+}
+
+void
+LRU::erase(Addr hostAddr)
+{
+    if(size == 1)
+	{
+		reset();
+		return;
+	}
+
+	auto iter = mapIndex.find(hostAddr);
+
+	if(iter != mapIndex.end())
+	{
+		int __index = iter->second;
+		size--;
+		exist[__index] = false;
+		mapIndex.erase(hostAddr);
+
+		int pre = member[__index].pre;
+		int next = member[__index].next;
+		if(pre != -1 && next != -1)
+		{
+			member[pre].next = next;
+			member[next].pre = pre;
+
+			member[__index].pre = -1;
+			member[__index].next = -1;
+			member[__index].hostAddr = -1;
+		}
+		else if(pre == -1) //index == head
+		{
+			member[__index].next = -1;
+			member[next].pre = -1;
+
+			member[__index].hostAddr = -1;
+			head = next;
+		}
+		else //index == tail
+		{
+			member[__index].pre = -1;
+			member[pre].next = -1;
+
+			member[__index].hostAddr = -1;
+			tail = pre;
+		}
+	}
+	else
+	{
+		/*printf("LRU erase error!\n");
+		exit(-1);*/
+		return;//nothing to do in ROW
+	}
 }
 
 void
