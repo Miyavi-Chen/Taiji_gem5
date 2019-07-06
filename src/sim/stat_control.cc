@@ -271,7 +271,7 @@ Global::Global()
         ;
 
     simSeconds = simTicks / simFreq;
-    IPC = simOps * simCPUFreq / simTicks;
+    IPC = simOpsNoWarmup * simCPUFreq / simTicks;
     hostInstRate = simInsts / hostSeconds;
     hostOpRate = simOps / hostSeconds;
     hostTickRate = simTicks / hostSeconds;

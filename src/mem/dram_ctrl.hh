@@ -677,13 +677,15 @@ class DRAMCtrl : public QoS::MemCtrl
         /** This comes from the outside world */
         const PacketPtr pkt;
 
+        bool hit;
+        bool giveUpWB;
         bool needAddDelay;
         Tick delay;
 
         /** MasterID associated with the packet */
         const MasterID _masterId;
 
-        const uint64_t QLen;
+        const uint64_t inQLen;
 
         const bool physAddrValid;
         const Addr physAddr;
@@ -778,11 +780,11 @@ class DRAMCtrl : public QoS::MemCtrl
 
         DRAMPacket(PacketPtr _pkt, bool is_read, uint8_t _rank, uint8_t _bank,
                    uint32_t _row, uint16_t bank_id, Addr _addr,
-                   unsigned int _size, Bank& bank_ref, Rank& rank_ref, int64_t qlen)
+                   unsigned int _size, Bank& bank_ref, Rank& rank_ref, int64_t inqlen)
             : entryTime(curTick()), readyTime(curTick()), pkt(_pkt),
-              needAddDelay(pkt->needAddDelay),
+              hit(false), giveUpWB(true), needAddDelay(pkt->needAddDelay),
               delay(needAddDelay ? pkt->delay: 0),
-              _masterId(pkt->masterId()), QLen(qlen),
+              _masterId(pkt->masterId()), inQLen(inqlen),
               physAddrValid(pkt->physAddrIsValid()),
               physAddr((physAddrValid) ? (_pkt->getPhysAddr()) : (0)),
               read(is_read), rank(_rank), bank(_bank), row(_row),
@@ -975,6 +977,7 @@ class DRAMCtrl : public QoS::MemCtrl
      */
     std::vector<DRAMPacketQueue> readQueue;
     std::vector<DRAMPacketQueue> writeQueue;
+    DRAMPacketQueue pendingWrResQueue;
 
     /**
      * To avoid iterating over the write queue to check for
@@ -1258,6 +1261,9 @@ class DRAMCtrl : public QoS::MemCtrl
     void calculateWaiting();
 
     void resetWaitingCounter();
+
+    EventFunctionWrapper pendingWrReleaseEvent;
+    void processPendingWrRelease();
 
 
     /**

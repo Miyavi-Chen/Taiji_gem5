@@ -121,6 +121,7 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     rdReqDeadlockEvent([this]{ rdReqDeadlock(); }, name()),
     wrReqDeadlockEvent([this]{ wrReqDeadlock(); }, name()),
     calculateWaitingEvent([this]{ calculateWaiting(); }, name()),
+    pendingWrReleaseEvent([this]{ processPendingWrRelease(); }, name()),
     enableBinAware(p->enable_bin_aware)
 {
     // sanity check the ranks since we rely on bit slicing for the
@@ -691,7 +692,14 @@ DRAMCtrl::decodeAddr(const PacketPtr pkt, Addr dramPktAddr, unsigned size,
 
     DPRINTF(DRAM, "Address: %lld Rank %d Bank %d Row %d\n",
             dramPktAddr, rank, bank, row);
-    uint64_t qsize = isRead ? totalReadQueueSize : totalWriteQueueSize;
+    uint64_t qsize;
+    if (isRead) {
+        qsize = respQueue.size() ?
+            readQueueSizes[1] + respQueue.size() : readQueueSizes[1];
+    } else {
+        qsize = pendingWrResQueue.size()?
+            writeQueueSizes[1] + pendingWrResQueue.size() : writeQueueSizes[1];
+    }
     // create the corresponding DRAM packet with the entry time and
     // ready time set to the current tick, the latter will be updated
     // later
@@ -722,8 +730,9 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
         unsigned size = std::min((addr | (burstSize - 1)) + 1,
                         pkt->getAddr() + pkt->getSize()) - addr;
         readPktSize[ceilLog2(size)]++;
-        readBursts++;
+        // readBursts++;
         if (pkt->masterId() != HybridMemID) {
+            readBursts++;
             readBurstsPI++;
         }
         masterReadAccesses[pkt->masterId()]++;
@@ -835,8 +844,9 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
         unsigned size = std::min((addr | (burstSize - 1)) + 1,
                         pkt->getAddr() + pkt->getSize()) - addr;
         writePktSize[ceilLog2(size)]++;
-        writeBursts++;
+        // writeBursts++;
         if (pkt->masterId() != HybridMemID) {
+            writeBursts++;
             writeBurstsPI++;
         }
         masterWriteAccesses[pkt->masterId()]++;
@@ -1080,6 +1090,14 @@ DRAMCtrl::processRespondEvent()
             "processRespondEvent(): Some req has reached its readyTime\n");
 
     DRAMPacket* dram_pkt = respQueue.front();
+
+    if (dram_pkt->masterId() != HybridMemID) {
+        const Addr mem_addr = dram_pkt->getPhysAddr();
+        PageAddr pageAddr = HybridMemptr->toMemAddr(mem_addr);
+        // Tick memLat = dram_pkt->readyTime - dram_pkt->entryTime;
+        uint64_t outQsize = readQueueSizes[1] + respQueue.size() -1;
+        HybridMemptr->CountScoreinc(pageAddr, true, dram_pkt->hit, dram_pkt->giveUpWB ,dram_pkt->inQLen,outQsize);
+    }
 
     // if a read has reached its ready-time, decrement the number of reads
     // At this point the packet has been handled and there is a possibility
@@ -1575,6 +1593,8 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
 
         // If there is a page open, precharge it.
         if (bank.openRow != Bank::NO_ROW) {
+            dram_pkt->giveUpWB = (memCellScheme == Enums::NvmWriteBack &&
+                                    bank.rowState == Bank::RowState::ROW_CLEAN);
             prechargeBank(rank, bank, std::max(bank.preAllowedAt, curTick()));
         }
 
@@ -1586,15 +1606,6 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         // constraints caused be a new activation (tRRD and tXAW)
         activateBank(rank, bank, act_tick, dram_pkt->row);
         assert(bank.rowState == Bank::RowState::ROW_CLEAN);
-    }
-
-    // if (name() == "system.mem_ctrls1")
-    //     std::cout<<std::flush;
-    if (dram_pkt->masterId() != HybridMemID &&
-            (dram_pkt->isRead() || dram_pkt->isWrite())) {
-        const Addr mem_addr = dram_pkt->getPhysAddr();
-        PageAddr pageAddr = HybridMemptr->toMemAddr(mem_addr);
-        HybridMemptr->CountScoreinc(pageAddr, dram_pkt->isRead(), row_hit, dram_pkt->QLen);
     }
 
 
@@ -1611,6 +1622,15 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
     if (dram_pkt->isWrite() && memCellScheme == Enums::NvmWriteThrough) {
             dram_pkt->readyTime += tWP;
     }
+    dram_pkt->hit = row_hit;
+
+    // if (dram_pkt->isRead() && dram_pkt->masterId() != HybridMemID) {
+    //     const Addr mem_addr = dram_pkt->getPhysAddr();
+    //     PageAddr pageAddr = HybridMemptr->toMemAddr(mem_addr);
+    //     Tick memLat = dram_pkt->readyTime - dram_pkt->entryTime;
+    //     uint64_t outQsize = readQueueSizes[1] - 1;
+    //     HybridMemptr->CountScoreinc(pageAddr, dram_pkt->isRead(), row_hit, dram_pkt->inQLen,outQsize , memLat);
+    // }
 
     // update the time for the next read/write burst for each
     // bank (add a max with tCCD/tCCD_L/tCCD_L_WR here)
@@ -1640,7 +1660,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
                     // Need to also take bus turnaround delays into account
                     dly_to_rd_cmd = dram_pkt->isRead() ? tBURST : wrToRdDly;
                     dly_to_wr_cmd = dram_pkt->isRead() ? rdToWrDly : tBURST;
-                    if (dram_pkt->isWrite() &&
+                    if (dram_pkt->bank == i && dram_pkt->isWrite() &&
                         memCellScheme == Enums::NvmWriteThrough) {
                         dly_to_rd_cmd += tWP;
                         dly_to_wr_cmd += tWP;
@@ -1785,8 +1805,9 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         perBankRdBursts[dram_pkt->bankId]++;
 
         // Update latency stats
-        totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+        // totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
         if (dram_pkt->masterId() != HybridMemID) {
+            totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
             totMemAccLatPI += dram_pkt->readyTime - dram_pkt->entryTime;
         } else {
             totMemAccLatMigration += dram_pkt->readyTime - dram_pkt->entryTime;
@@ -2105,7 +2126,18 @@ DRAMCtrl::processNextReqEvent()
         // remove the request from the queue - the iterator is no longer valid
         writeQueue[dram_pkt->qosValue()].erase(to_write);
 
-        delete dram_pkt;
+        // delay the delet of request for MLP calc
+        if (dram_pkt->masterId() == HybridMemID) {
+            delete dram_pkt;
+        } else {
+            pendingWrResQueue.push_back(dram_pkt);
+        }
+
+        if (!pendingWrReleaseEvent.scheduled() && !pendingWrResQueue.empty()) {
+            schedule(pendingWrReleaseEvent, dram_pkt->readyTime);
+        } else {
+            //NA
+        }
 
         // If we emptied the write queue, or got sufficiently below the
         // threshold (using the minWritesPerSwitch as the hysteresis) and
@@ -2156,6 +2188,41 @@ DRAMCtrl::processNextReqEvent()
         retryWrReq = false;
         port.sendRetryReq();
     }
+}
+
+void
+DRAMCtrl::processPendingWrRelease()
+{
+    if (!pendingWrResQueue.empty()) {
+        auto dram_pkt = pendingWrResQueue.front();
+        if (dram_pkt->masterId() != HybridMemID) {
+            const Addr mem_addr = dram_pkt->getPhysAddr();
+            PageAddr pageAddr = HybridMemptr->toMemAddr(mem_addr);
+            // Tick memLat = dram_pkt->readyTime - dram_pkt->entryTime;
+            uint64_t outQsize = readQueueSizes[1];
+            // if (outQsize) {
+            //     auto pkt = readQueue[1][0];
+            //     if (pkt->inQLen == 0) {
+            //         *const_cast<uint64_t*>(&pkt->inQLen) = 1;
+            //     }
+            // }
+
+            HybridMemptr->CountScoreinc(pageAddr, false, dram_pkt->hit, false ,dram_pkt->inQLen, outQsize);
+        }
+
+        pendingWrResQueue.pop_front();
+        delete dram_pkt;
+    }
+
+    if (!pendingWrResQueue.empty()) {
+        auto dram_pkt = pendingWrResQueue.front();
+        if (!pendingWrReleaseEvent.scheduled()) {
+            schedule(pendingWrReleaseEvent, dram_pkt->readyTime);
+        } else {
+            reschedule(pendingWrReleaseEvent, dram_pkt->readyTime);
+        }
+    }
+
 }
 
 pair<vector<uint32_t>, bool>
@@ -2413,12 +2480,13 @@ void
 DRAMCtrl::Rank::processRefreshEvent()
 {
     //skip refresh if count of bin refreshed this time is 0
-    if(memory.enableBinAware && !memory.binsNeedREF->at(rank)->at(nextREFBin)) {
+    if (memory.enableBinAware && refreshState == REF_IDLE
+        && !memory.binsNeedREF->at(rank)->at(nextREFBin)) {
         tmpREFState = refreshState;
         refreshState = REF_PASS;
     }
 
-    if(refreshState == REF_PASS) {
+    if (refreshState == REF_PASS) {
         refreshState = tmpREFState;
         tmpREFState = REF_IDLE;
         // std::cout<<"Skip Ref at Bin: "<<nextREFBin<<"\n";
@@ -2433,7 +2501,7 @@ DRAMCtrl::Rank::processRefreshEvent()
             reschedule(refreshEvent, refreshDueAt);
 
         return;
-    }else {
+    } else {
         //nothing
     }
 

@@ -208,7 +208,7 @@ class HybridMem : public ClockedObject
         {
           bins[binNum].binReset(idx);
           if (nextFreeBin > binNum) {
-            std::cout<<"Free bin change from "<<nextFreeBin<<" "<<binNum<<"\n";
+            // std::cout<<"Free bin change from "<<nextFreeBin<<" "<<binNum<<"\n";
             nextFreeBin = binNum;
           }
         }
@@ -232,7 +232,7 @@ class HybridMem : public ClockedObject
           for (int i=0; i < ranksPerChannel; ++i) {
             binsInRanks.push_back(BinsOfRank(pagesPerBin));
           }
-          std::cout<<"\nInit BinsInRanks\n";
+          // std::cout<<"\nInit BinsInRanks\n";
         }
 
         size_t getFreeFrame ()
@@ -273,8 +273,8 @@ class HybridMem : public ClockedObject
           size_t idx = pageNumOfRank % pagesPerBin;
           binsInRanks[rank].releaseFrame(binNum, idx);
           updateCtrlRefTable(rank, binNum);
-          std::cout<<"BinsOfRank free bin "<<binNum<<" ";
-          std::cout<<"idx "<<idx<<"\n";
+          // std::cout<<"BinsOfRank free bin "<<binNum<<" ";
+          // std::cout<<"idx "<<idx<<"\n";
         }
 
         void updateCtrlRefTable (size_t rank, size_t binNum)
@@ -597,16 +597,17 @@ class HybridMem : public ClockedObject
         {
           pageAddr.val = std::numeric_limits<Addr>::max();
 
-          readcount = writecount = migrationCount = 0;
+          readcount = totRdQLen = writecount = migrationCount = 0;
           isDirty = isInDram = isPageCache = false;
           migrationIntervalTotal = lastMigrationInterval = 0;
-          RWScoresPerInterval = dirty_num = 0;
+          RScoresPerInterval = WScoresPerInterval = dirty_num = 0;
           predictRowHit = predictRowMiss = lastAccessTick = 0;
           readreqPerInterval = writereqPerInterval = 0;
           lastAccessInterval = 0;
         }
 
         int readcount;
+        int totRdQLen;
         int writecount;
         bool isDirty;
         bool isInDram;
@@ -618,7 +619,8 @@ class HybridMem : public ClockedObject
         int lastMigrationInterval;
 
         //score include read and write
-        size_t RWScoresPerInterval;
+        size_t RScoresPerInterval;
+        size_t WScoresPerInterval;
         //only write
         size_t dirty_num;
 
@@ -790,13 +792,15 @@ class HybridMem : public ClockedObject
         {
           if (isPageCache) {readcount = -64; writecount = -64;}
           else {readcount = 0; writecount = 0;}
+          totRdQLen = 0;
           //observation
           // migrationCount = 0;
           // migrationIntervalTotal = 0;
           // lastMigrationInterval = 0;
 
           //score include read and write
-          RWScoresPerInterval = 0;
+          RScoresPerInterval = 0;
+          WScoresPerInterval = 0;
           //only write
           dirty_num = 0;
 
@@ -1337,13 +1341,14 @@ class HybridMem : public ClockedObject
 
     DrainState drain() override;
 
-    void CountScoreinc(struct PageAddr, bool isRead, bool hit, uint64_t qlen);
+    void CountScoreinc(struct PageAddr, bool isRead, bool hit, bool giveUpWB, uint64_t qlen, uint64_t outQsize);
 
     void ReadCountinc(class Page *page, uint64_t qlen);
 
     void WriteCountinc(class Page *page, uint64_t qlen);
 
-    size_t addScoreToPage(class Page *page, size_t score);
+    size_t addRScoreToPage(class Page *page, size_t score);
+    void addWScoreToPage(class Page *page, size_t score);
 
     void getPageRanking(std::vector<Addr>& v);
 
@@ -1440,6 +1445,8 @@ class HybridMem : public ClockedObject
     Stats::Scalar lastWarmupAt;
     Stats::Scalar badMigrationPageCount;
     Stats::Scalar migrationPageCount;
+    Stats::Scalar migrationPageCount2DRAM;
+    Stats::Scalar migrationPageCount2PCM;
     Stats::Scalar totBlockedreqMemAccLat;
     Stats::Scalar totBlockedreqMemAccLatWDelay;
 
@@ -1455,6 +1462,8 @@ class HybridMem : public ClockedObject
     Tick totBlockedreqMemAccLatPI;
     Tick totBlockedreqMemAccLatWDelayPI;
     size_t blockedreqThisInterval;
+    uint64_t giveUpWBCount;
+    uint64_t nonGiveUpWBCount;
     std::deque<Tick> reqBlockedTickDiff;
 
 
