@@ -137,6 +137,7 @@ class RubySystem : public ClockedObject
   public:
     Profiler* m_profiler;
     CacheRecorder* m_cache_recorder;
+    std::vector<MasterID> cacheCtrlsID;
     std::vector<std::map<uint32_t, AbstractController *> > m_abstract_controls;
 };
 

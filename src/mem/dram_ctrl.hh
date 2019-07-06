@@ -68,6 +68,7 @@
 #include "enums/PageManage.hh"
 #include "enums/MemCellScheme.hh"
 #include "mem/drampower.hh"
+#include "mem/mem_addr_type.hh"
 #include "mem/qos/mem_ctrl.hh"
 #include "mem/qport.hh"
 #include "params/DRAMCtrl.hh"
@@ -677,6 +678,7 @@ class DRAMCtrl : public QoS::MemCtrl
         /** This comes from the outside world */
         const PacketPtr pkt;
 
+        PageAddr hostAddr;
         bool needAddDelay;
         Tick delay;
 
@@ -780,7 +782,7 @@ class DRAMCtrl : public QoS::MemCtrl
                    uint32_t _row, uint16_t bank_id, Addr _addr,
                    unsigned int _size, Bank& bank_ref, Rank& rank_ref, int64_t qlen)
             : entryTime(curTick()), readyTime(curTick()), pkt(_pkt),
-              needAddDelay(pkt->needAddDelay),
+              hostAddr{pkt->getPhysAddr()}, needAddDelay(pkt->needAddDelay),
               delay(needAddDelay ? pkt->delay: 0),
               _masterId(pkt->masterId()), QLen(qlen),
               physAddrValid(pkt->physAddrIsValid()),
@@ -975,6 +977,7 @@ class DRAMCtrl : public QoS::MemCtrl
      */
     std::vector<DRAMPacketQueue> readQueue;
     std::vector<DRAMPacketQueue> writeQueue;
+    DRAMPacketQueue pendingWrResQueue;
 
     /**
      * To avoid iterating over the write queue to check for
@@ -1258,6 +1261,9 @@ class DRAMCtrl : public QoS::MemCtrl
     void calculateWaiting();
 
     void resetWaitingCounter();
+
+    EventFunctionWrapper pendingWrReleaseEvent;
+    void processPendingWrRelease();
 
 
     /**

@@ -1144,6 +1144,10 @@ DefaultCommit<Impl>::commitInsts()
     DPRINTF(CommitRate, "%i\n", num_committed);
     numCommittedDist.sample(num_committed);
 
+    if (num_committed < 2) {
+        cpu->instStall();
+    }
+
     if (num_committed == commitWidth) {
         commitEligibleSamples++;
     }

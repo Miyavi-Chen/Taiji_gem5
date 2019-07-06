@@ -79,7 +79,7 @@ TimingSimpleCPU::TimingCPUPort::TickEvent::schedule(PacketPtr _pkt, Tick t)
 TimingSimpleCPU::TimingSimpleCPU(TimingSimpleCPUParams *p)
     : BaseSimpleCPU(p), fetchTranslation(this), icachePort(this),
       dcachePort(this), ifetch_pkt(NULL), dcache_pkt(NULL), previousCycle(0),
-      fetchEvent([this]{ fetch(); }, name())
+      fetchEvent([this]{ fetch(); }, name()), numStalls(0)
 {
     _status = Idle;
 }
@@ -88,6 +88,24 @@ TimingSimpleCPU::TimingSimpleCPU(TimingSimpleCPUParams *p)
 
 TimingSimpleCPU::~TimingSimpleCPU()
 {
+}
+
+void
+TimingSimpleCPU::instStall()
+{
+    ++numStalls;
+}
+
+Counter
+TimingSimpleCPU::getInstStall() const
+{
+     return numStalls;
+}
+
+void
+TimingSimpleCPU::resetInstStall()
+{
+    numStalls = 0;
 }
 
 DrainState

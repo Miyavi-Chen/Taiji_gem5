@@ -49,7 +49,7 @@
 
 MinorCPU::MinorCPU(MinorCPUParams *params) :
     BaseCPU(params),
-    threadPolicy(params->threadPolicy)
+    threadPolicy(params->threadPolicy), numStalls(0)
 {
     /* This is only written for one thread at the moment */
     Minor::MinorThread *thread;
@@ -119,6 +119,24 @@ MinorCPU::init()
             TheISA::initCPU(tc, cpuId());
         }
     }
+}
+
+void
+MinorCPU::instStall()
+{
+    ++numStalls;
+}
+
+Counter
+MinorCPU::getInstStall() const
+{
+     return numStalls;
+}
+
+void
+MinorCPU::resetInstStall()
+{
+    numStalls = 0;
 }
 
 /** Stats interface from SimObject (by way of BaseCPU) */

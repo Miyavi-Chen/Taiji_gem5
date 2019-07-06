@@ -168,6 +168,15 @@ class CheckerCPU : public BaseCPU, public ExecContext
         return 0;
     }
 
+    virtual Counter getInstStall() const override
+    {
+        return 0;
+    }
+
+    virtual void resetInstStall() override
+    {
+    }
+
     // number of simulated loads
     Counter numLoad;
     Counter startNumLoad;

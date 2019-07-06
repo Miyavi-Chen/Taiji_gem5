@@ -243,6 +243,7 @@ void
 ROB<Impl>::retireHead(ThreadID tid)
 {
     robWrites++;
+    robRetires++;
 
     assert(numInstsInROB > 0);
 
@@ -542,6 +543,10 @@ ROB<Impl>::regStats()
     robWrites
         .name(name() + ".rob_writes")
         .desc("The number of ROB writes");
+
+    robRetires
+        .name(name() + ".rob_retires")
+        .desc("The number of ROB retires");
 }
 
 template <class Impl>

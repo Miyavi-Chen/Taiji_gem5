@@ -46,6 +46,7 @@
 #include <iostream>
 #include <utility>
 
+#include "cpu/base.hh"
 #include "mem/dram_ctrl.hh"
 #include "mem/lfu.hh"
 #include "mem/lru.hh"
@@ -63,6 +64,8 @@
  * currently not modified.
  */
 class DRAMCtrl;
+class BaseCPU;
+
 class HybridMem : public ClockedObject
 {
   friend class DRAMCtrl;
@@ -601,6 +604,10 @@ class HybridMem : public ClockedObject
 
           readcount = writecount = migrationCount = 0;
           RowBufMissRd = RowBufMissWr = 0;
+          avgReadMLP = avgWriteMLP = 1;
+          ReadMLPAcc = WriteMLPAcc = 0;
+          ReadMLPTimes = WriteMLPTimes = 0;
+          pid = -2;
           justMigrate = isDirty = isInDram = isPageCache = false;
           migrationIntervalTotal = lastMigrationInterval = 0;
           RWScoresPerInterval = 0;
@@ -613,6 +620,13 @@ class HybridMem : public ClockedObject
         int writecount;
         int RowBufMissRd;
         int RowBufMissWr;
+        double avgReadMLP;//鎂周期總MLP平均
+				double avgWriteMLP;//鎂周期總MLP平均
+				double ReadMLPAcc;//鎂周期outstanding reqs倒數之和
+        double WriteMLPAcc;
+				int ReadMLPTimes;//鎂周期outstanding reqs倒數加了幾次
+				int WriteMLPTimes;
+				int pid;
         bool justMigrate;
         bool isDirty;
         bool isInDram;
@@ -803,8 +817,11 @@ class HybridMem : public ClockedObject
           RWScoresPerInterval = 0;
 
           justMigrate = false;
-          RowBufMissRd = 0;
-          RowBufMissWr = 0;
+          RowBufMissRd = RowBufMissWr = 0;
+          avgReadMLP = avgWriteMLP = 1;
+          ReadMLPAcc = WriteMLPAcc = 0;
+          ReadMLPTimes = WriteMLPTimes = 0;
+          // pid = -2;
 
           predictRowHit = 0;
           predictRowMiss = 0;
@@ -1340,11 +1357,11 @@ class HybridMem : public ClockedObject
 
     DrainState drain() override;
 
-    void CountScoreinc(struct PageAddr, bool isRead, bool hit, uint64_t qlen);
+    void CountScoreinc(struct PageAddr, bool isRead, bool hit, MasterID id);
 
-    void ReadCountinc(class Page *page, uint64_t qlen);
+    void ReadCountinc(class Page *const page);
 
-    void WriteCountinc(class Page *page, uint64_t qlen);
+    void WriteCountinc(class Page *const page);
 
     size_t addScoreToPage(class Page *page, size_t score);
 
@@ -1372,12 +1389,33 @@ class HybridMem : public ClockedObject
     void incMissThres();
     void decMissThres();
     void incRowBufferMissCount(struct PageAddr pageaddr, size_t value, bool isRead);
+    void memNumInc(MasterID id, bool isRead);
+    void memNumDec(MasterID id, bool isRead);
+    void memReqAdd(Addr hostAddr, MasterID id, bool isRead);
+    void memReqPop(Addr hostAddr, MasterID id, bool isRead);
+    void MLPCalRd();
+    void MLPCalWr();
+    void MLPAvgCal(class Page * page);
+
+    /**
+     * Burst-align an address.
+     *
+     * @param addr The potentially unaligned address
+     *
+     * @return An address aligned to a DRAM burst
+     */
+    const uint32_t burstSize;
+    Addr burstAlign(Addr addr) const { return (addr & ~(Addr(burstSize - 1))); }
 
     void processWarmUpEvent();
     EventFunctionWrapper warmUpEvent;
 
     void processRegularBalancedEvent();
     EventFunctionWrapper regularBalancedEvent;
+
+    void processMLPUpdateEvent();
+    EventFunctionWrapper MLPUpdateEvent;
+    Tick DRAMmemCycle2Tick;
     bool hasWarmedUp;
 
     std::vector<DRAMCtrl *> ctrlptrs;
@@ -1387,6 +1425,13 @@ class HybridMem : public ClockedObject
 
     MasterID dirCtrlId;
     class AbstractController *dirCtrlPtr;
+
+    std::vector<MasterID> *cacheCtrlsIDptr;
+    std::vector<int64_t> cpuRdReqs;//Outstanding reqs of each core
+    std::vector<int64_t> cpuWrReqs;//Outstanding reqs of each core
+    std::unordered_map<MasterID, int> cacheIDmap;
+    std::unordered_map<Addr, class Page *> reqsPageMapRd;
+    std::unordered_map<Addr, class Page *> reqsPageMapWr;
 
     Tick timeInterval;
     Tick timeWarmup;
@@ -1428,11 +1473,12 @@ class HybridMem : public ClockedObject
     uint64_t reqInDramCountPI;
 
 		LRU statsStore;
-    int MissThreshold;
+    double MissThreshold;
 		int numMigrate;
 		int numReadDram;
 		int numWriteDram;
-		int64_t preBenefit;
+		Counter preNumStalls;
+    Counter preBenefit;
 		bool dirMissThreshold;
 
 

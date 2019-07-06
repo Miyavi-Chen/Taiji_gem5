@@ -207,6 +207,8 @@ class System : public SimObject
 
     unsigned numContexts() const { return threadContexts.size(); }
 
+    BaseCPU *getFirstCPUptr() {return threadContexts[0]->getCpuPtr();}
+
     /** Return number of running (non-halted) thread contexts in
      * system.  These threads could be Active or Suspended. */
     int numRunningContexts();

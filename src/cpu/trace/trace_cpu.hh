@@ -150,6 +150,10 @@ class TraceCPU : public BaseCPU
 
     void init();
 
+    void instStall();
+    Counter getInstStall() const override;
+    void resetInstStall() override;
+
     /**
      * This is a pure virtual function in BaseCPU. As we don't know how many
      * insts are in the trace but only know how how many micro-ops are we
@@ -1134,6 +1138,8 @@ class TraceCPU : public BaseCPU
      * message is printed.
      */
     uint64_t progressMsgThreshold;
+
+    Counter numStalls;
 
     Stats::Scalar numSchedDcacheEvent;
     Stats::Scalar numSchedIcacheEvent;

@@ -437,6 +437,9 @@ class BaseCPU : public ClockedObject
 
     virtual Counter totalOps() const = 0;
 
+    virtual Counter getInstStall() const = 0;
+    virtual void resetInstStall() = 0;
+
     /**
      * Schedule an event that exits the simulation loops after a
      * predefined number of instructions.
@@ -614,6 +617,24 @@ class BaseCPU : public ClockedObject
             total += cpuList[i]->totalOps();
 
         return total;
+    }
+
+    static Counter numSimulatedStalls()
+    {
+        Counter total = 0;
+
+        int size = cpuList.size();
+        for (int i = 0; i < size; ++i)
+            total += cpuList[i]->getInstStall();
+
+        return total;
+    }
+
+    static void resetSimulatedStalls()
+    {
+        int size = cpuList.size();
+        for (int i = 0; i < size; ++i)
+            cpuList[i]->resetInstStall();
     }
 
     static Counter getCPUClock()

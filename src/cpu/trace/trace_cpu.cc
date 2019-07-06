@@ -64,7 +64,8 @@ TraceCPU::TraceCPU(TraceCPUParams *params)
         execCompleteEvent(nullptr),
         enableEarlyExit(params->enableEarlyExit),
         progressMsgInterval(params->progressMsgInterval),
-        progressMsgThreshold(params->progressMsgInterval)
+        progressMsgThreshold(params->progressMsgInterval),
+        numStalls(0)
 {
     // Increment static counter for number of Trace CPUs.
     ++TraceCPU::numTraceCPUs;
@@ -84,6 +85,24 @@ TraceCPU::TraceCPU(TraceCPUParams *params)
 TraceCPU::~TraceCPU()
 {
 
+}
+
+void
+TraceCPU::instStall()
+{
+    ++numStalls;
+}
+
+Counter
+TraceCPU::getInstStall() const
+{
+     return numStalls;
+}
+
+void
+TraceCPU::resetInstStall()
+{
+    numStalls = 0;
 }
 
 TraceCPU*

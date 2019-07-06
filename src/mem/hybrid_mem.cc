@@ -44,6 +44,7 @@
 #include "sim/system.hh"
 #include "debug/Drain.hh"
 #include "mem/lru.cc"
+#include "mem/ruby/system/RubySystem.hh"
 
 #define MISSHITRATIOPCM 8.1
 #define MISSHITRATIODRAM 3.0
@@ -77,8 +78,10 @@ HybridMem::HybridMem(const HybridMemParams* p)
       pages(pools, memRanges, granularity, channelRanges.size()),
       migrationEvent([this]{ issueTimingMigrationPkt(); }, name()),
       releaseSentStateEvent([this]{ releaseSentState(); }, name()),
+      burstSize(64),
       warmUpEvent([this]{processWarmUpEvent(); }, name()),
       regularBalancedEvent([this]{processRegularBalancedEvent(); }, name()),
+      MLPUpdateEvent([this]{processMLPUpdateEvent(); }, name()),
       hasWarmedUp(false),
       timeInterval(p->time_interval), timeWarmup(p->time_warmup),
       totalInterval(0), skipInterval(0),
@@ -92,8 +95,9 @@ HybridMem::HybridMem(const HybridMemParams* p)
       refPagePerIntervalnum(0), refPageinDramPerIntervalnum(0),
       refPageinPcmPerIntervalnum(0), reqInDramCount(0), reqInPcmCount(0),
       reqInDramCountPI(0),
-      statsStore(128), MissThreshold(32), numMigrate(0),
-      numReadDram(0), numWriteDram(0), preBenefit(0), dirMissThreshold(false),
+      statsStore(2048), MissThreshold(1024), numMigrate(0),
+      numReadDram(0), numWriteDram(0), preNumStalls(0), preBenefit(0),
+      dirMissThreshold(false),
       MigrationTimeStartAt(0), bootUpTick(0),
       prevArrival(0), reqsPI(0), totGapPI(0),
       avgGapPI(0), totBlockedreqMemAccLatPI(0),
@@ -176,6 +180,9 @@ HybridMem::init()
             break;
         }
     }
+    DRAMmemCycle2Tick = ctrlptrs[cacheMem_id.val]->tCK;
+
+    *(const_cast<uint32_t *>(&burstSize)) = ctrlptrs[cacheMem_id.val]->burstSize;
     ctrlptrs[cacheMem_id.val]->HybridMemID = masterId;
     ctrlptrs[mainMem_id.val]->HybridMemID = masterId;
     ctrlptrs[cacheMem_id.val]->timeInterval = double(timeInterval)/1000000000000;
@@ -188,17 +195,35 @@ HybridMem::init()
 
     dirCtrlPtr = reinterpret_cast<AbstractController *>(SimObject::find ("system.ruby.dir_cntrl0"));
     // dirCtrlId = sys->lookupMasterId(dirCtrlPtr);
+    cacheCtrlsIDptr = &(dirCtrlPtr->params()->ruby_system->cacheCtrlsID);
+
+    for (int i = 0; i < sys->numContexts(); ++i) {
+        cpuRdReqs.push_back(0);
+        cpuWrReqs.push_back(0);
+    }
+
 }
 
 void
 HybridMem::startup()
 {
+    for (int i = 0; i < cacheCtrlsIDptr->size(); ++i) {
+        cacheIDmap[cacheCtrlsIDptr->at(i)] = i;
+    }
+
+
     bootUpTick = curTick();
     std::cout<<"boot up at " <<bootUpTick<<"\n";
 
     if (!FullSystem) {
         schedule(warmUpEvent, curTick() + timeWarmup);
         std::cout<<"Schedule warmUpEvent when start up \n";
+    }
+
+    if (!MLPUpdateEvent.scheduled()) {
+        schedule(MLPUpdateEvent, curTick() + 6*DRAMmemCycle2Tick);
+    } else {
+        reschedule(MLPUpdateEvent, curTick() + 6*DRAMmemCycle2Tick);
     }
 
     if (timeInterval == 0) {return;}
@@ -275,17 +300,18 @@ HybridMem::processRegularBalancedEvent()
         resetPerInterval();
         return;
     }
-    // numMigrate = migrationPagesPI.size();
     int64_t benefit =
-        ((int64_t)numReadDram * 22 + (int64_t)numWriteDram * 172) 						- (int64_t)numMigrate * 242;
+        ((int64_t)numReadDram * 22 + (int64_t)numWriteDram * 172)
+            - (int64_t)numMigrate * 242;//0.833*4*64+28
     std::cout<<"benefit "<< benefit<<" ";
+
+    Counter totNumStalls = sys->getFirstCPUptr()->numSimulatedStalls();
+    sys->getFirstCPUptr()->resetSimulatedStalls();
+    std::cout<<"totNumStalls "<< totNumStalls<<" ";
     std::cout<<"numMigrate "<< numMigrate<<" ";
-    std::cout<<"MissThreshold "<< MissThreshold<<"\n";
 
 
-	if(benefit < 0)
-		incMissThres();
-	else if(benefit > preBenefit)
+	if(totNumStalls > preNumStalls)
 	{
 		if(dirMissThreshold)
 			incMissThres();
@@ -299,9 +325,12 @@ HybridMem::processRegularBalancedEvent()
 		else
 			incMissThres();
 	}
-	preBenefit = benefit;
+	preNumStalls = totNumStalls;
+    preBenefit = benefit;
 
     resetPerInterval();
+    std::cout<<"MissThreshold "<< MissThreshold<<"\n";
+
 
     return;
 }
@@ -390,6 +419,11 @@ HybridMem::resetPerInterval()
     for (auto ctrlptr : ctrlptrs) {
         ctrlptr->resetPerInterval();
     }
+
+    // for (int i = 0; i < cacheCtrlsIDptr->size(); ++i) {
+    //     cpuRdReqs[i] = 0;
+    //     cpuWrReqs[i] = 0;
+    // }
 
     for (auto pageNum : migrationPagesPI) {
         PageAddr pageAddr = {pageNum.first};
@@ -601,7 +635,7 @@ HybridMem::getPort(const std::string &if_name, PortID idx)
 void
 HybridMem::recvFunctional(PacketPtr pkt)
 {
-    const Addr mem_addr = pkt->getAddr();
+    const Addr memAddr = pkt->getAddr();
     const bool isRead = pkt->isRead();
     const bool isWrite = pkt->isWrite();
     class Page *page = pages.pageOf(toPageAddr(pkt));
@@ -614,7 +648,7 @@ HybridMem::recvFunctional(PacketPtr pkt)
 
     pkt->setAddr(channel_addr);
     masterPort.sendFunctional(pkt);
-    pkt->setAddr(mem_addr);
+    pkt->setAddr(memAddr);
 
     assert(!(isRead && isWrite));
     if (isRead) { page->launchReadTo(channel_idx); }
@@ -624,7 +658,7 @@ HybridMem::recvFunctional(PacketPtr pkt)
 void
 HybridMem::recvFunctionalSnoop(PacketPtr pkt)
 {
-    const Addr mem_addr = pkt->getAddr();
+    const Addr memAddr = pkt->getAddr();
     const bool isRead = pkt->isRead();
     const bool isWrite = pkt->isWrite();
     class Page *page = pages.pageOf(toPageAddr(pkt));
@@ -636,7 +670,7 @@ HybridMem::recvFunctionalSnoop(PacketPtr pkt)
 
     pkt->setAddr(channel_addr);
     slavePort.sendFunctionalSnoop(pkt);
-    pkt->setAddr(mem_addr);
+    pkt->setAddr(memAddr);
 
     assert(!(isRead && isWrite));
     if (isRead) { page->launchReadTo(channel_idx); }
@@ -646,7 +680,7 @@ HybridMem::recvFunctionalSnoop(PacketPtr pkt)
 Tick
 HybridMem::recvAtomic(PacketPtr pkt)
 {
-    const Addr mem_addr = pkt->getAddr();
+    const Addr memAddr = pkt->getAddr();
     const bool isRead = pkt->isRead();
     const bool isWrite = pkt->isWrite();
     class Page *page = pages.pageOf(toPageAddr(pkt));
@@ -659,7 +693,7 @@ HybridMem::recvAtomic(PacketPtr pkt)
 
     pkt->setAddr(channel_addr);
     Tick ret_tick = masterPort.sendAtomic(pkt);
-    pkt->setAddr(mem_addr);
+    pkt->setAddr(memAddr);
 
     assert(!(isRead && isWrite));
     if (isRead) { page->launchReadTo(channel_idx); }
@@ -671,7 +705,7 @@ HybridMem::recvAtomic(PacketPtr pkt)
 Tick
 HybridMem::recvAtomicSnoop(PacketPtr pkt)
 {
-    const Addr mem_addr = pkt->getAddr();
+    const Addr memAddr = pkt->getAddr();
     const bool isRead = pkt->isRead();
     const bool isWrite = pkt->isWrite();
     class Page *page = pages.pageOf(toPageAddr(pkt));
@@ -683,7 +717,7 @@ HybridMem::recvAtomicSnoop(PacketPtr pkt)
 
     pkt->setAddr(channel_addr);
     Tick ret_tick = slavePort.sendAtomicSnoop(pkt);
-    pkt->setAddr(mem_addr);
+    pkt->setAddr(memAddr);
 
     assert(!(isRead && isWrite));
     if (isRead) { page->launchReadTo(channel_idx); }
@@ -796,7 +830,7 @@ HybridMem::issueTimingMigrationPkt()
 bool
 HybridMem::recvTimingReq(PacketPtr pkt)
 {
-    const Addr mem_addr = pkt->getAddr();
+    const Addr memAddr = pkt->getAddr();
     const bool isRead = pkt->isRead();
     const bool isWrite = pkt->isWrite();
     class Page *page = pages.pageOf(toPageAddr(pkt));
@@ -862,7 +896,7 @@ HybridMem::recvTimingReq(PacketPtr pkt)
     const bool cacheResponding = pkt->cacheResponding();
 
     if (needsResponse && !cacheResponding) {
-        pkt->pushSenderState(new HybridMemSenderState(mem_addr));
+        pkt->pushSenderState(new HybridMemSenderState(memAddr));
     }
 
     if (!reqBlockedTickDiff.empty() && !pkt->needAddDelay) {
@@ -874,7 +908,7 @@ HybridMem::recvTimingReq(PacketPtr pkt)
     pkt->setAddr(channel_addr);
     const bool successful = masterPort.sendTimingReq(pkt);
     if (!successful) {
-        pkt->setAddr(mem_addr);
+        pkt->setAddr(memAddr);
         if (needsResponse) {
             delete pkt->popSenderState();
         }
@@ -893,6 +927,8 @@ HybridMem::recvTimingReq(PacketPtr pkt)
             iterPI->second += 1;
         }
 
+        memNumInc(pkt->masterId(), isRead);
+
         // predicRowHitOrMiss(page);
         assert(!(isRead && isWrite));
         if (isRead) {
@@ -900,6 +936,7 @@ HybridMem::recvTimingReq(PacketPtr pkt)
             reqsPI++;
             page->launchReadTo(channel_idx);
             page->readreqPerInterval++;
+            // reqsPageMapRd[burstAlign(memAddr)] = page;
         }
         if (isWrite) {
             writeReqs++;
@@ -907,6 +944,7 @@ HybridMem::recvTimingReq(PacketPtr pkt)
             page->launchWriteTo(channel_idx);
             page->writereqPerInterval++;
             page->isDirty = true;
+            // reqsPageMapWr[burstAlign(memAddr)] = page;
         }
 
     }
@@ -1624,7 +1662,7 @@ HybridMem::updateBWInfo()
 }
 
 void
-HybridMem::CountScoreinc(struct PageAddr pageaddr, bool isRead, bool hit, uint64_t qlen)
+HybridMem::CountScoreinc(struct PageAddr pageaddr, bool isRead, bool hit, MasterID id)
 {
     class Page *page = pages.pageOf(pageaddr);
     bool indram = page->isInDram;
@@ -1635,9 +1673,9 @@ HybridMem::CountScoreinc(struct PageAddr pageaddr, bool isRead, bool hit, uint64
     }
 
     if (isRead) {
-        ReadCountinc(page, qlen);
+        ReadCountinc(page);
     } else {
-        WriteCountinc(page, qlen);
+        WriteCountinc(page);
     }
 
     if (indram) {
@@ -1647,19 +1685,19 @@ HybridMem::CountScoreinc(struct PageAddr pageaddr, bool isRead, bool hit, uint64
             if (isRead) {
                 incRowBufferMissCount(pageaddr, 1, isRead);
             } else {
-                incRowBufferMissCount(pageaddr, RWLATENCYRATIOPCM, isRead);
+                incRowBufferMissCount(pageaddr, 1, isRead);
             }
         }
     }
 }
 
 void
-HybridMem::ReadCountinc(class Page *page, uint64_t qlen)
+HybridMem::ReadCountinc(class Page *const page)
 {
     Addr pageAddr = page->getPageAddr().val;
-    auto iter = mapRef.insert(pageAddr);
+    auto iterBool = mapRef.insert(pageAddr);
 
-    if (iter.second == true) {
+    if (iterBool.second == true) {
         refPagePerIntervalnum++;
         if (page->isInDram) {
             // ref_pages_in_DRAM_queue.push_back(pageAddr);
@@ -1679,12 +1717,12 @@ HybridMem::ReadCountinc(class Page *page, uint64_t qlen)
 }
 
 void
-HybridMem::WriteCountinc(class Page *page, uint64_t qlen)
+HybridMem::WriteCountinc(class Page *const page)
 {
     Addr pageAddr = page->getPageAddr().val;
-    auto iter = mapRef.insert(pageAddr);
+    auto iterBool = mapRef.insert(pageAddr);
 
-    if (iter.second == true) {
+    if (iterBool.second == true) {
         refPagePerIntervalnum++;
         if (page->isInDram) {
             // ref_pages_in_DRAM_queue.push_back(host_PN);
@@ -1745,10 +1783,14 @@ HybridMem::incRowBufferMissCount(struct PageAddr pageaddr, size_t value, bool is
         page->RowBufMissWr += value;
     }
 
-	if (page->RowBufMissRd + page->RowBufMissWr > MissThreshold) {
+    MLPAvgCal(page);
+    double utility =
+        page->RowBufMissRd * 22 * page->avgReadMLP +
+        page->RowBufMissWr * 172 * page->avgWriteMLP;
+	if (utility > MissThreshold) {
 		statsStore.erase(pageAddr);
-		page->RowBufMissRd = 0;
-        page->RowBufMissWr = 0;
+		page->resetPageCounters();
+        // page->RowBufMissWr = 0;
         // page->justMigrate = true;
 
 		//migrate
@@ -1764,8 +1806,7 @@ HybridMem::incRowBufferMissCount(struct PageAddr pageaddr, size_t value, bool is
 		evictPN = statsStore.put(pageAddr);
 		if (evictPN.val != std::numeric_limits<Addr>::max()) {
             class Page *_page = pages.pageOf(evictPN);
-			_page->RowBufMissRd = 0;
-            _page->RowBufMissWr = 0;
+			_page->resetPageCounters();
 		}
 	}
 }
@@ -1785,12 +1826,124 @@ HybridMem::incMissThres()
 void
 HybridMem::decMissThres()
 {
-	MissThreshold--;
+	int pre = MissThreshold--;
+    if(pre <= MissThreshold)
+	{
+		printf("MissThres too big!\n");
+		exit(-1);
+	}
 	if(MissThreshold < 0)
 		MissThreshold = 0;
 	dirMissThreshold = false;
 }
 
+void
+HybridMem::memNumInc(MasterID id, bool isRead)
+{
+    if (id == masterId) {return;}
+
+    std::unordered_map<MasterID, int>::iterator iter;
+    assert((iter = cacheIDmap.find(id)) != cacheIDmap.end());
+    if (isRead) {
+        int64_t preCnt = cpuRdReqs[iter->second]++;
+        assert(preCnt < cpuRdReqs[iter->second]);
+    } else {
+        int64_t preCnt = cpuWrReqs[iter->second]++;
+        assert(preCnt < cpuWrReqs[iter->second]);
+    }
+}
+
+void
+HybridMem::memNumDec(MasterID id, bool isRead)
+{
+    if (id == masterId) {return;}
+
+    std::unordered_map<MasterID, int>::iterator iter;
+    assert((iter = cacheIDmap.find(id)) != cacheIDmap.end());
+    if (isRead) {
+        int64_t preCnt = cpuRdReqs[iter->second]--;
+        assert(preCnt > cpuRdReqs[iter->second]);
+    } else {
+        int64_t preCnt = cpuWrReqs[iter->second]--;
+        assert(preCnt > cpuWrReqs[iter->second]);
+    }
+}
+
+void
+HybridMem::memReqAdd(Addr hostAddr, MasterID id, bool isRead)
+{
+    PageAddr pageAddr = {hostAddr};
+    class Page *page = pages.pageOf(pageAddr);
+    if (id == masterId) {return;}
+    if (isRead) {
+        page->pid = cacheIDmap.find(id)->second;
+        reqsPageMapRd[burstAlign(hostAddr)] = page;
+    } else {
+        page->pid = cacheIDmap.find(id)->second;
+        reqsPageMapWr[burstAlign(hostAddr)] = page;
+    }
+}
+
+void
+HybridMem::memReqPop(Addr hostAddr, MasterID id, bool isRead)
+{
+    if (id == masterId) {return;}
+    if (isRead) {
+        assert(reqsPageMapRd.find(hostAddr) != reqsPageMapRd.end());
+        reqsPageMapRd.erase(hostAddr);
+    } else {
+        assert(reqsPageMapWr.find(hostAddr) != reqsPageMapWr.end());
+        reqsPageMapWr.erase(hostAddr);
+    }
+}
+
+void
+HybridMem::MLPCalRd()
+{
+    for (auto &iter : reqsPageMapRd) {
+        assert((cpuRdReqs[iter.second->pid] != 0));
+        iter.second->ReadMLPAcc += 1 / (double)cpuRdReqs[iter.second->pid];
+        ++iter.second->ReadMLPTimes;
+    }
+}
+
+void
+HybridMem::MLPCalWr()
+{
+    for (auto &iter : reqsPageMapWr) {
+        assert((cpuWrReqs[iter.second->pid] != 0));
+        iter.second->WriteMLPAcc += 1 / (double)cpuWrReqs[iter.second->pid];
+        ++iter.second->WriteMLPTimes;
+    }
+}
+
+void
+HybridMem::MLPAvgCal(class Page * page)
+{
+    if (page->ReadMLPTimes != 0)
+        page->avgReadMLP = page->ReadMLPAcc / (double)page->ReadMLPTimes;
+    else
+        page->avgReadMLP = 0;
+
+    if (page->WriteMLPTimes != 0)
+        page->avgWriteMLP = page->WriteMLPAcc / (double)page->WriteMLPTimes;
+    else
+        page->avgWriteMLP = 0;
+}
+
+void
+HybridMem::processMLPUpdateEvent()
+{
+    MLPCalRd();
+    MLPCalWr();
+
+    if (!MLPUpdateEvent.scheduled()) {
+        schedule(MLPUpdateEvent, curTick() + 6*DRAMmemCycle2Tick);
+    } else {
+        reschedule(MLPUpdateEvent, curTick() + 6*DRAMmemCycle2Tick);
+    }
+
+}
 
 void
 HybridMem::resetStats() {

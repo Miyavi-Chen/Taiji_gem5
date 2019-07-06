@@ -191,6 +191,7 @@ class AbstractController : public ClockedObject, public Consumer
     const MasterID m_masterId;
     MasterID dmaDeviceId;
     class SimObject *dmaDevicePtr;
+    std::vector<MasterID> *cacheCtrlsIDptr;
 
     Network *m_net_ptr;
     bool m_is_blocking;

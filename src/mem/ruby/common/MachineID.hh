@@ -55,6 +55,30 @@ MachineIDToString(MachineID machine)
     return csprintf("%s_%d", MachineType_to_string(machine.type), machine.num);
 }
 
+
+inline std::string
+CacheIDToString(MachineID cacheCtrl)
+{
+    std::string cacheCtrlstr;
+    switch(cacheCtrl.getType()) {
+      case MachineType_L1Cache:
+        cacheCtrlstr.assign("system.ruby.l1_cntrl");
+        break;
+      case MachineType_L2Cache:
+        cacheCtrlstr.assign("system.ruby.l2_cntrl");
+        break;
+      case MachineType_L3Cache:
+        cacheCtrlstr.assign("system.ruby.l3_cntrl");
+        break;
+      case MachineType_Directory:
+        cacheCtrlstr.assign("system.ruby.dir_cntrl");
+        break;
+      default:
+        panic("Invalid range for type MachineType");
+    }
+    return csprintf("%s%d", cacheCtrlstr.c_str(), cacheCtrl.num);
+}
+
 inline bool
 operator==(const MachineID & obj1, const MachineID & obj2)
 {

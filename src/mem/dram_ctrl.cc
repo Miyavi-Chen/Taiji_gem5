@@ -121,6 +121,7 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
     rdReqDeadlockEvent([this]{ rdReqDeadlock(); }, name()),
     wrReqDeadlockEvent([this]{ wrReqDeadlock(); }, name()),
     calculateWaitingEvent([this]{ calculateWaiting(); }, name()),
+    pendingWrReleaseEvent([this]{ processPendingWrRelease(); }, name()),
     enableBinAware(p->enable_bin_aware)
 {
     // sanity check the ranks since we rely on bit slicing for the
@@ -777,6 +778,9 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
             DPRINTF(DRAM, "Adding to read queue\n");
 
             readQueue[dram_pkt->qosValue()].push_back(dram_pkt);
+            if (pkt->masterId() != HybridMemID) {
+                HybridMemptr->memReqAdd(pkt->getPhysAddr(), pkt->masterId(), pkt->isRead());
+            }
 
             ++dram_pkt->rankRef.readEntries;
 
@@ -859,6 +863,10 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
             writeQueue[dram_pkt->qosValue()].push_back(dram_pkt);
             isInWriteQueue.insert(burstAlign(addr));
 
+            if (pkt->masterId() != HybridMemID) {
+                HybridMemptr->memReqAdd(pkt->getPhysAddr(), pkt->masterId(), pkt->isRead());
+            }
+
             // log packet
             logRequest(MemCtrl::WRITE, pkt->masterId(), pkt->qosValue(),
                        dram_pkt->addr, 1);
@@ -867,7 +875,7 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
 
             // Update stats
             avgWrQLen = totalWriteQueueSize;
-            avgWrQLenPI = writeQueueSizes[1];
+            avgWrQLenPI = writeQueueSizes[1];//prio 1 for normal reqs
 
             auto wrQLen = totalWriteQueueSize;
             assert(((lastWrQLen > wrQLen) && ((lastWrQLen - wrQLen) == 1)) ||
@@ -1140,6 +1148,8 @@ DRAMCtrl::processRespondEvent()
         accessAndRespond(dram_pkt->pkt, frontendLatency + backendLatency);
     }
 
+    HybridMemptr->memNumDec(dram_pkt->masterId(), dram_pkt->isRead());
+    HybridMemptr->memReqPop(dram_pkt->getPhysAddr(), dram_pkt->masterId(), dram_pkt->isRead());
     delete respQueue.front();
     respQueue.pop_front();
     rdQLenPdf[totalReadQueueSize + respQueue.size()]++;
@@ -1594,7 +1604,7 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
             (dram_pkt->isRead() || dram_pkt->isWrite())) {
         const Addr mem_addr = dram_pkt->getPhysAddr();
         PageAddr pageAddr = HybridMemptr->toMemAddr(mem_addr);
-        HybridMemptr->CountScoreinc(pageAddr, dram_pkt->isRead(), row_hit, dram_pkt->QLen);
+        HybridMemptr->CountScoreinc(pageAddr, dram_pkt->isRead(), row_hit, dram_pkt->masterId());
     }
 
 
@@ -2104,8 +2114,20 @@ DRAMCtrl::processNextReqEvent()
 
         // remove the request from the queue - the iterator is no longer valid
         writeQueue[dram_pkt->qosValue()].erase(to_write);
+        // delay the delet of request for MLP calc
+        if (dram_pkt->masterId() == HybridMemID) {
+            delete dram_pkt;
+        } else {
+            pendingWrResQueue.push_back(dram_pkt);
+        }
 
-        delete dram_pkt;
+        if (!pendingWrReleaseEvent.scheduled() && !pendingWrResQueue.empty()) {
+            schedule(pendingWrReleaseEvent, dram_pkt->readyTime);
+        } else {
+            //NA
+        }
+
+        // delete dram_pkt;
 
         // If we emptied the write queue, or got sufficiently below the
         // threshold (using the minWritesPerSwitch as the hysteresis) and
@@ -2156,6 +2178,28 @@ DRAMCtrl::processNextReqEvent()
         retryWrReq = false;
         port.sendRetryReq();
     }
+}
+
+void
+DRAMCtrl::processPendingWrRelease()
+{
+    if (!pendingWrResQueue.empty()) {
+        auto dram_pkt = pendingWrResQueue.front();
+        HybridMemptr->memNumDec(dram_pkt->masterId(), dram_pkt->isRead());
+        HybridMemptr->memReqPop(dram_pkt->getPhysAddr(), dram_pkt->masterId(), dram_pkt->isRead());
+        pendingWrResQueue.pop_front();
+        delete dram_pkt;
+    }
+
+    if (!pendingWrResQueue.empty()) {
+        auto dram_pkt = pendingWrResQueue.front();
+        if (!pendingWrReleaseEvent.scheduled()) {
+            schedule(pendingWrReleaseEvent, dram_pkt->readyTime);
+        } else {
+            reschedule(pendingWrReleaseEvent, dram_pkt->readyTime);
+        }
+    }
+
 }
 
 pair<vector<uint32_t>, bool>
@@ -2407,6 +2451,15 @@ DRAMCtrl::Rank::processWriteDoneEvent()
     // Write transfer on bus has completed
     // decrement per rank counter
     --outstandingEvents;
+
+    // if (!memory.pendingWrResQueue.empty()) {
+    //     auto dram_pkt = memory.pendingWrResQueue.front();
+    //     memory.HybridMemptr->memNumDec(dram_pkt->masterId(), dram_pkt->isRead());
+    //     memory.HybridMemptr->memReqPop(dram_pkt->getPhysAddr(), dram_pkt->masterId(), dram_pkt->isRead());
+    //     memory.pendingWrResQueue.pop_front();
+    //     delete dram_pkt;
+    // }
+
 }
 
 void

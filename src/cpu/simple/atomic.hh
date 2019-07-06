@@ -58,6 +58,10 @@ class AtomicSimpleCPU : public BaseSimpleCPU
 
     void init() override;
 
+    void instStall();
+    Counter getInstStall() const override;
+    void resetInstStall() override;
+
   protected:
 
     EventFunctionWrapper tickEvent;
@@ -170,6 +174,8 @@ class AtomicSimpleCPU : public BaseSimpleCPU
 
     /** Probe Points. */
     ProbePointArg<std::pair<SimpleThread*, const StaticInstPtr>> *ppCommit;
+
+    Counter numStalls;
 
   protected:
 

@@ -86,7 +86,7 @@ AtomicSimpleCPU::AtomicSimpleCPU(AtomicSimpleCPUParams *p)
       icachePort(name() + ".icache_port", this),
       dcachePort(name() + ".dcache_port", this),
       dcache_access(false), dcache_latency(0),
-      ppCommit(nullptr)
+      ppCommit(nullptr), numStalls(0)
 {
     _status = Idle;
     ifetch_req = std::make_shared<Request>();
@@ -101,6 +101,24 @@ AtomicSimpleCPU::~AtomicSimpleCPU()
     if (tickEvent.scheduled()) {
         deschedule(tickEvent);
     }
+}
+
+void
+AtomicSimpleCPU::instStall()
+{
+    ++numStalls;
+}
+
+Counter
+AtomicSimpleCPU::getInstStall() const
+{
+     return numStalls;
+}
+
+void
+AtomicSimpleCPU::resetInstStall()
+{
+    numStalls = 0;
 }
 
 DrainState

@@ -330,6 +330,8 @@ class ROB
     Stats::Scalar robReads;
     // The number of rob_writes
     Stats::Scalar robWrites;
+
+    Stats::Scalar robRetires;
 };
 
 #endif //__CPU_O3_ROB_HH__

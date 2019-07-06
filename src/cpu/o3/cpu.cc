@@ -188,7 +188,7 @@ FullO3CPU<Impl>::FullO3CPU(DerivO3CPUParams *params)
 
       globalSeqNum(1),
       system(params->system),
-      lastRunningCycle(curCycle())
+      lastRunningCycle(curCycle()), numStalls(0)
 {
     if (!params->switched_out) {
         _status = Running;
@@ -1578,6 +1578,27 @@ FullO3CPU<Impl>::instDone(ThreadID tid, const DynInstPtr &inst)
     committedOps[tid]++;
 
     probeInstCommit(inst->staticInst, inst->instAddr());
+}
+
+template <class Impl>
+void
+FullO3CPU<Impl>::instStall()
+{
+    ++numStalls;
+}
+
+template <class Impl>
+Counter
+FullO3CPU<Impl>::getInstStall() const
+{
+    return numStalls;
+}
+
+template <class Impl>
+void
+FullO3CPU<Impl>::resetInstStall()
+{
+    numStalls = 0;
 }
 
 template <class Impl>

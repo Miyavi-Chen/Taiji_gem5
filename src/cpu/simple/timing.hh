@@ -56,6 +56,9 @@ class TimingSimpleCPU : public BaseSimpleCPU
     virtual ~TimingSimpleCPU();
 
     void init() override;
+    void instStall();
+    Counter getInstStall() const override;
+    void resetInstStall() override;
 
   private:
 
@@ -325,6 +328,8 @@ class TimingSimpleCPU : public BaseSimpleCPU
   private:
 
     EventFunctionWrapper fetchEvent;
+
+    Counter numStalls;
 
     struct IprEvent : Event {
         Packet *pkt;

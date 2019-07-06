@@ -112,6 +112,8 @@ class MinorCPU : public BaseCPU
 
     /** Thread Scheduling Policy (RoundRobin, Random, etc) */
     Enums::ThreadPolicy threadPolicy;
+
+    Counter numStalls;
   protected:
      /** Return a reference to the data port. */
     MasterPort &getDataPort() override;
@@ -129,6 +131,10 @@ class MinorCPU : public BaseCPU
     void init() override;
     void startup() override;
     void wakeup(ThreadID tid) override;
+
+    void instStall();
+    Counter getInstStall() const override;
+    void resetInstStall() override;
 
     Addr dbg_vtophys(Addr addr);
 

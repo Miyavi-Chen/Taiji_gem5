@@ -64,7 +64,7 @@ AbstractController::AbstractController(const Params *p)
         // of this particular type.
         Stats::registerDumpCallback(new StatsCallback(this));
     }
-    
+
     dmaDevicePtr = nullptr;
     dmaDeviceId = 0;
 }
@@ -79,9 +79,16 @@ AbstractController::init()
         m_delayVCHistogram.push_back(new Stats::Histogram());
         m_delayVCHistogram[i]->init(10);
     }
-    
+
+    cacheCtrlsIDptr = &(params()->ruby_system->cacheCtrlsID);
+
     dmaDevicePtr = SimObject::find ("system.pci_ide");
     dmaDeviceId = params()->system->lookupMasterId(dmaDevicePtr);
+
+    MachineID id = this->getMachineID();
+    if (id.getType() == MachineType_L1Cache) {
+        cacheCtrlsIDptr->push_back(this->m_masterId);
+    }
 }
 
 void
@@ -246,8 +253,22 @@ void
 AbstractController::queueMemoryRead(const MachineID &id, Addr addr,
                                     Cycles latency)
 {
-    RequestPtr req = std::make_shared<Request>(
-        addr, RubySystem::getBlockSizeBytes(), 0, m_masterId);
+    RequestPtr req = nullptr;
+
+    if (id.getType() == MachineType_L1Cache) {
+        // NodeID nodeid = id.getNum();
+        // std::string idToString = CacheIDToString(id);
+
+        req = std::make_shared<Request>(
+            addr, RubySystem::getBlockSizeBytes(), 0, cacheCtrlsIDptr->at(id.getNum()));
+    } else if (id.getType() == MachineType_DMA) {
+        req = std::make_shared<Request>(
+            addr, RubySystem::getBlockSizeBytes(), 0, dmaDeviceId);
+    } else {
+        req = std::make_shared<Request>(
+            addr, RubySystem::getBlockSizeBytes(), 0, m_masterId);
+    }
+
 
     PacketPtr pkt = Packet::createRead(req);
     uint8_t *newData = new uint8_t[RubySystem::getBlockSizeBytes()];
@@ -270,8 +291,18 @@ void
 AbstractController::queueMemoryWrite(const MachineID &id, Addr addr,
                                      Cycles latency, const DataBlock &block)
 {
-    RequestPtr req = std::make_shared<Request>(
-        addr, RubySystem::getBlockSizeBytes(), 0, m_masterId);
+    RequestPtr req = nullptr;
+
+    if (id.getType() == MachineType_L1Cache) {
+        req = std::make_shared<Request>(
+            addr, RubySystem::getBlockSizeBytes(), 0, cacheCtrlsIDptr->at(id.getNum()));
+    } else if (id.getType() == MachineType_DMA) {
+        req = std::make_shared<Request>(
+            addr, RubySystem::getBlockSizeBytes(), 0, dmaDeviceId);
+    } else {
+        req = std::make_shared<Request>(
+            addr, RubySystem::getBlockSizeBytes(), 0, m_masterId);
+    }
 
     PacketPtr pkt = Packet::createWrite(req);
     pkt->allocate();
@@ -302,7 +333,7 @@ AbstractController::queueMemoryWritePartial(const MachineID &id, Addr addr,
     } else {
         req = std::make_shared<Request>(addr, size, 0, m_masterId);
     }
-    
+
     PacketPtr pkt = Packet::createWrite(req);
     pkt->allocate();
     pkt->setData(block.getData(getOffset(addr), size));
