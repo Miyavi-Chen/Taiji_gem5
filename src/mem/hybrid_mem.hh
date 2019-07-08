@@ -601,6 +601,7 @@ class HybridMem : public ClockedObject
 
           readcount = writecount = migrationCount = 0;
           RowBufMissRd = RowBufMissWr = 0;
+          clockDirtyBit = false;
           justMigrate = isDirty = isInDram = isPageCache = false;
           migrationIntervalTotal = lastMigrationInterval = 0;
           RWScoresPerInterval = 0;
@@ -613,6 +614,7 @@ class HybridMem : public ClockedObject
         int writecount;
         int RowBufMissRd;
         int RowBufMissWr;
+        bool clockDirtyBit;
         bool justMigrate;
         bool isDirty;
         bool isInDram;
@@ -1055,6 +1057,35 @@ class HybridMem : public ClockedObject
 
     };
 
+    class Clock
+		{
+			private:
+				int rollingIdx;
+				int threshold;
+				int expired;
+				// Pagetable *pt;
+
+				class storage
+				{
+					public:
+						// bool dirtyBit;
+						int freqCount;
+						int overlook;
+
+						class Page *page;
+
+				};
+				std::vector<storage> list;
+
+			public:
+				Clock();
+				class Page *getEvicPage();
+				void putPage(class Page *);
+        void popPage(class Page *);
+				// void setDirty(class Page *);
+		};
+		Clock* dwf;
+
     class HybridMemSenderState : public Packet::SenderState
     {
 
@@ -1454,6 +1485,8 @@ class HybridMem : public ClockedObject
     Stats::Scalar lastWarmupAt;
     Stats::Scalar badMigrationPageCount;
     Stats::Scalar migrationPageCount;
+    Stats::Scalar migrationPageCount2DRAM;
+    Stats::Scalar migrationPageCount2PCM;
     Stats::Scalar totBlockedreqMemAccLat;
     Stats::Scalar totBlockedreqMemAccLatWDelay;
 
