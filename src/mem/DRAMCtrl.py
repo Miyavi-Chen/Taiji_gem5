@@ -738,11 +738,11 @@ class DDR4_2400_8G_8x8(DDR4_2400_16x4):
 # Total channel capacity is 4GB
 # 4 devices/rank * 1 ranks/channel * 1GB/device = 4GB/channel
 class DDR4_2400_4x16(DDR4_2400_16x4):
-    # Number of priorities in the system
-    qos_priorities = 2
-    # QoS scheduler policy: tags request with QoS priority value
-    qos_policy = QoSFixedPriorityPolicy()
-    # qos_policy.setMasterPriority("hybrid_mem", 1)
+    # # Number of priorities in the system
+    # qos_priorities = 2
+    # # QoS scheduler policy: tags request with QoS priority value
+    # qos_policy = QoSFixedPriorityPolicy()
+    # # qos_policy.setMasterPriority("hybrid_mem", 1)
 
     # enable_bin_aware = True
     # 4x16 configuration, 4 devices each with an 16-bit interface
@@ -1398,11 +1398,11 @@ class PCM_LPDDR2_4G_400_8x8(PCM_LPDDR2_400_8x8):
 
 # 2009DAC_PDRAM: A hybrid PRAM and DRAM main memory system
 class PCM_LPDDR2_8G_400_16x4(PCM_LPDDR2_400_8x8):
-    # Number of priorities in the system
-    qos_priorities = 2
-    # QoS scheduler policy: tags request with QoS priority value
-    qos_policy = QoSFixedPriorityPolicy()
-    # qos_policy.setMasterPriority("hybrid_mem", 1)
+    # # Number of priorities in the system
+    # qos_priorities = 2
+    # # QoS scheduler policy: tags request with QoS priority value
+    # qos_policy = QoSFixedPriorityPolicy()
+    # # qos_policy.setMasterPriority("hybrid_mem", 1)
 
     # size of device
     device_size = '512MB'
@@ -1410,6 +1410,7 @@ class PCM_LPDDR2_8G_400_16x4(PCM_LPDDR2_400_8x8):
     tRCD = '28ns'
     tWP = '150ns'
     tCL = '15ns'
+    tRAS = '43ns'
 
     # 16x4 configuration, 1 device with a 4-bit interface
     device_bus_width = 4

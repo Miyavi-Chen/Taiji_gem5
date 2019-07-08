@@ -188,6 +188,8 @@ HybridMem::init()
 
     dirCtrlPtr = reinterpret_cast<AbstractController *>(SimObject::find ("system.ruby.dir_cntrl0"));
     // dirCtrlId = sys->lookupMasterId(dirCtrlPtr);
+
+    dwf = new Clock();
 }
 
 void
@@ -275,32 +277,7 @@ HybridMem::processRegularBalancedEvent()
         resetPerInterval();
         return;
     }
-    // numMigrate = migrationPagesPI.size();
-    int64_t benefit =
-        ((int64_t)numReadDram * 22 + (int64_t)numWriteDram * 172) 						- (int64_t)numMigrate * 242;
-    std::cout<<"benefit "<< benefit<<" ";
-    std::cout<<"numMigrate "<< numMigrate<<" ";
-    std::cout<<"MissThreshold "<< MissThreshold<<"\n";
-
-
-	if(benefit < 0)
-		incMissThres();
-	else if(benefit > preBenefit)
-	{
-		if(dirMissThreshold)
-			incMissThres();
-		else
-			decMissThres();
-	}
-	else
-	{
-		if(dirMissThreshold)
-			decMissThres();
-		else
-			incMissThres();
-	}
-	preBenefit = benefit;
-
+    std::cout<<"numMigrate "<< numMigrate<<"\n";
     resetPerInterval();
 
     return;
@@ -505,6 +482,7 @@ HybridMem::genPcmMigrationTasks(class Page * page)
     }
     page->isInDram = true;
     page->claimChannelIsValid(cacheMem_id);
+    dwf->putPage(page);
 }
 
 void
@@ -526,6 +504,7 @@ HybridMem::genDramMigrationTasks(class Page * page)
 
     page->isInDram = false;
     page->claimChannelIsValid(mainMem_id);
+    dwf->popPage(page);
 
 }
 
@@ -707,6 +686,11 @@ HybridMem::tryIssueMigrationTask(class Page *page,
     ++(page->migrationCount);
     page->lastMigrationInterval = totalInterval;
     ++migrationPageCount;
+    if (_to.val == cacheMem_id.val) {
+        ++migrationPageCount2DRAM;
+    } else {
+        ++migrationPageCount2PCM;
+    }
     if (page->migrationCount > 2) {
         ++badMigrationPageCount;
     }
@@ -810,7 +794,6 @@ HybridMem::recvTimingReq(PacketPtr pkt)
 
     if (page->inMigrating()) {
         page->bookingMasterWaiting();
-        // totBlockedReqsForMigration += 1;
         return false;
     }
 
@@ -841,16 +824,13 @@ HybridMem::recvTimingReq(PacketPtr pkt)
             wait = WaitState::wMASTER;
             return false;
         } else if (wait == WaitState::tryMASTER_wSELF) {
-            // wait = WaitState::wMASTER_wSELF;
-            wait = WaitState::wSELF_wMASTER;
-            // totBlockedReqsForMigration += 1;
-            // reqBlockedAt.push_back(curTick());
+            wait = WaitState::wMASTER_wSELF;
+            // wait = WaitState::wSELF_wMASTER;
             return false;
         } else {
             assert(0);
         }
     }
-
 
     Tick releaseSentStateTick = clockEdge(Cycles(1));
     releaseSentStateTick += (pkt->hasData()) ?
@@ -919,8 +899,8 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         } else if (wait == WaitState::tryMASTER) {
             wait = WaitState::wMASTER;
         } else if (wait == WaitState::tryMASTER_wSELF) {
-            // wait = WaitState::wMASTER_wSELF;
-            wait = WaitState::wSELF_wMASTER;
+            wait = WaitState::wMASTER_wSELF;
+            // wait = WaitState::wSELF_wMASTER;
         } else {
             assert(0);
         }
@@ -939,6 +919,24 @@ HybridMem::recvTimingReq(PacketPtr pkt)
         }
         sent = SentState::sMASTER;
         reschedule(releaseSentStateEvent, releaseSentStateTick, true);
+
+        //Clock_DWF
+        if (isWrite) {
+            if (page->isInDram) {
+                if (!page->clockDirtyBit) {
+                    dwf->setDirty(page);
+                    page->clockDirtyBit = true;
+                }
+            } else {
+                if (pools.poolOf(cacheMem_id)->getFreeFrameSize()) {
+                    genPcmMigrationTasks(page);
+                } else {
+                    class Page *evicPage = dwf->getEvicPage();
+                    genDramMigrationTasks(evicPage);
+                }
+                // return false;
+            }
+        }
     }
 
     if (!regularBalancedEvent.scheduled()) {
@@ -960,8 +958,8 @@ HybridMem::recvTimingMigrationReq(class MigrationTask *task, PacketPtr pkt)
     } else if (wait == WaitState::trySELF_wMASTER) {
         // pass
     } else if (wait == WaitState::wMASTER) {
-        // wait = WaitState::wMASTER_wSELF;
-        wait = WaitState::wSELF_wMASTER;
+        wait = WaitState::wMASTER_wSELF;
+        // wait = WaitState::wSELF_wMASTER;
         return false;
     } else {
         assert(0);
@@ -1183,7 +1181,6 @@ HybridMem::trySendRetry()
                 assert(0);
             } else if (wait == WaitState::wSELF_wMASTER) {
                 wait = WaitState::trySELF_wMASTER;
-                // totBlockedReqsForMigration += 1;
                 issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
                     wait = WaitState::wMASTER;
@@ -1195,11 +1192,10 @@ HybridMem::trySendRetry()
                     wait = WaitState::wNONE;
                 }
             } else if (wait == WaitState::wMASTER_wSELF) {
-                // wait = WaitState::tryMASTER_wSELF;
-                // slavePort.sendRetryReq();
-                // totBlockedReqsForMigration += 1;
-                wait = WaitState::trySELF_wMASTER;
-                issueTimingMigrationPkt();
+                wait = WaitState::tryMASTER_wSELF;
+                slavePort.sendRetryReq();
+                // wait = WaitState::trySELF_wMASTER;
+                // issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
                     wait = WaitState::wMASTER;
                 }
@@ -1224,11 +1220,10 @@ HybridMem::trySendRetry()
                     wait = WaitState::wNONE;
                 }
             } else if (wait == WaitState::wMASTER_wSELF) {
-                // wait = WaitState::tryMASTER_wSELF;
-                // slavePort.sendRetryReq();
-                // totBlockedReqsForMigration += 1;
-                wait = WaitState::trySELF_wMASTER;
-                issueTimingMigrationPkt();
+                wait = WaitState::tryMASTER_wSELF;
+                slavePort.sendRetryReq();
+                // wait = WaitState::trySELF_wMASTER;
+                // issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
                     wait = WaitState::wMASTER;
                 }
@@ -1245,7 +1240,6 @@ HybridMem::trySendRetry()
             if (false) {
                 assert(0);
             } else if (wait == WaitState::wSELF_wMASTER) {
-                // totBlockedReqsForMigration += 1;
                 wait = WaitState::trySELF_wMASTER;
                 issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
@@ -1791,6 +1785,101 @@ HybridMem::decMissThres()
 	dirMissThreshold = false;
 }
 
+HybridMem::Clock::Clock() :
+    rollingIdx(0), threshold(0), expired(1)
+{
+}
+
+void
+HybridMem::Clock::putPage(class Page *_page)
+{
+	storage tmp;
+	tmp.dirtyBit = false;
+	tmp.freqCount = 0;
+	tmp.overlook = 0;
+
+	tmp.page = _page;
+	list.push_back(tmp);
+}
+
+void
+HybridMem::Clock::popPage(class Page *_page)
+{
+    bool found = false;
+	for(unsigned long int i = 0 ; i < list.size() ; i++)
+		if(list[i].page->getPageAddr().val == _page->getPageAddr().val)
+		{
+			list.erase(list.begin() + i);
+			found = true;
+			break;
+		}
+
+	if(!found)
+	{
+		std::cout<<"Not found in Clock!\n";
+		exit(-1);
+	}
+}
+
+void
+HybridMem::Clock::setDirty(class Page *_page)//can optimize
+{
+	bool found = false;
+	for(unsigned long int i = 0 ; i < list.size() ; i++)
+		if(list[i].page->getPageAddr().val == _page->getPageAddr().val)
+		{
+			list[i].dirtyBit = true;
+			found = true;
+			break;
+		}
+
+	if(!found)
+	{
+		std::cout<<"Not found in Clock!\n";
+		exit(-1);
+	}
+}
+
+class HybridMem::Page *
+HybridMem::Clock::getEvicPage()
+{
+	unsigned long int i;
+    class Page *evicPage = nullptr;
+
+	bool found = false;
+	for(i = rollingIdx ;;)
+	{
+		if(list[i].dirtyBit == false)
+		{
+			if((list[i].freqCount > threshold) && (list[i].overlook < expired))
+				list[i].overlook++;
+			else
+			{
+				found = true;
+				evicPage = list[i].page;
+				list.erase(list.begin() + i);
+				evicPage->clockDirtyBit = false;
+			}
+		}
+		else
+		{
+			list[i].dirtyBit = false;
+			list[i].page->clockDirtyBit = false;
+			list[i].freqCount++;
+			list[i].overlook = 0;
+		}
+
+		if(found)
+			break;
+
+		i++;
+		if(i == list.size())
+			i = 0;
+	}
+	rollingIdx = i;
+    return evicPage;
+}
+
 
 void
 HybridMem::resetStats() {
@@ -1862,6 +1951,14 @@ HybridMem::regStats()
     migrationPageCount
         .name(name() + ".migrationPageCount")
         .desc("The count of page migrated to or back PCM/DRAM");
+
+    migrationPageCount2DRAM
+        .name(name() + ".migrationPageCount2DRAM")
+        .desc("The count of page migrated to DRAM");
+
+    migrationPageCount2PCM
+        .name(name() + ".migrationPageCount2PCM")
+        .desc("The count of page migrated to PCM");
 
     totBlockedreqMemAccLat
         .name(name() + ".totBlockedreqMemAccLat")

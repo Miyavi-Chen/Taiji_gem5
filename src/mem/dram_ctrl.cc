@@ -722,8 +722,9 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
         unsigned size = std::min((addr | (burstSize - 1)) + 1,
                         pkt->getAddr() + pkt->getSize()) - addr;
         readPktSize[ceilLog2(size)]++;
-        readBursts++;
+        // readBursts++;
         if (pkt->masterId() != HybridMemID) {
+            readBursts++;
             readBurstsPI++;
         }
         masterReadAccesses[pkt->masterId()]++;
@@ -786,8 +787,13 @@ DRAMCtrl::addToReadQueue(PacketPtr pkt, unsigned int pktCount)
 
             // Update stats
             // avgRdQLen = totalReadQueueSize + respQueue.size();
-            avgRdQLen = readQueueSizes[1];
-            avgRdQLenPI = readQueueSizes[1];
+            if (pkt->masterId() != HybridMemID) {
+                avgRdQLen = readQueueSizes[0];
+                avgRdQLenPI = readQueueSizes[0];
+            } else {
+                std::cout<<::flush;
+            }
+
 
             auto rdQLen = totalReadQueueSize + respQueue.size();
             assert(((lastRdQLen > rdQLen) && ((lastRdQLen - rdQLen) == 1)) ||
@@ -835,8 +841,9 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
         unsigned size = std::min((addr | (burstSize - 1)) + 1,
                         pkt->getAddr() + pkt->getSize()) - addr;
         writePktSize[ceilLog2(size)]++;
-        writeBursts++;
+        // writeBursts++;
         if (pkt->masterId() != HybridMemID) {
+            writeBursts++;
             writeBurstsPI++;
         }
         masterWriteAccesses[pkt->masterId()]++;
@@ -866,8 +873,13 @@ DRAMCtrl::addToWriteQueue(PacketPtr pkt, unsigned int pktCount)
             assert(totalWriteQueueSize == isInWriteQueue.size());
 
             // Update stats
-            avgWrQLen = totalWriteQueueSize;
-            avgWrQLenPI = writeQueueSizes[1];
+            if (pkt->masterId() != HybridMemID) {
+                avgWrQLen = totalWriteQueueSize;
+                avgWrQLenPI = writeQueueSizes[0];
+            } else {
+                std::cout<<::flush;
+            }
+
 
             auto wrQLen = totalWriteQueueSize;
             assert(((lastWrQLen > wrQLen) && ((lastWrQLen - wrQLen) == 1)) ||
@@ -1588,14 +1600,14 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         assert(bank.rowState == Bank::RowState::ROW_CLEAN);
     }
 
-    // if (name() == "system.mem_ctrls1")
-    //     std::cout<<std::flush;
-    if (dram_pkt->masterId() != HybridMemID &&
-            (dram_pkt->isRead() || dram_pkt->isWrite())) {
-        const Addr mem_addr = dram_pkt->getPhysAddr();
-        PageAddr pageAddr = HybridMemptr->toMemAddr(mem_addr);
-        HybridMemptr->CountScoreinc(pageAddr, dram_pkt->isRead(), row_hit, dram_pkt->QLen);
-    }
+    // // if (name() == "system.mem_ctrls1")
+    // //     std::cout<<std::flush;
+    // if (dram_pkt->masterId() != HybridMemID &&
+    //         (dram_pkt->isRead() || dram_pkt->isWrite())) {
+    //     const Addr mem_addr = dram_pkt->getPhysAddr();
+    //     PageAddr pageAddr = HybridMemptr->toMemAddr(mem_addr);
+    //     HybridMemptr->CountScoreinc(pageAddr, dram_pkt->isRead(), row_hit, dram_pkt->QLen);
+    // }
 
 
     // respect any constraints on the command (e.g. tRCD or tCCD)
@@ -1785,8 +1797,9 @@ DRAMCtrl::doDRAMAccess(DRAMPacket* dram_pkt)
         perBankRdBursts[dram_pkt->bankId]++;
 
         // Update latency stats
-        totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
+        // totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
         if (dram_pkt->masterId() != HybridMemID) {
+            totMemAccLat += dram_pkt->readyTime - dram_pkt->entryTime;
             totMemAccLatPI += dram_pkt->readyTime - dram_pkt->entryTime;
         } else {
             totMemAccLatMigration += dram_pkt->readyTime - dram_pkt->entryTime;
