@@ -601,20 +601,22 @@ class HybridMem : public ClockedObject
 
           readcount = writecount = migrationCount = 0;
           RowBufMissRd = RowBufMissWr = 0;
-          clockDirtyBit = false;
+          wirdDirtyBit = false;
           justMigrate = isDirty = isInDram = isPageCache = false;
           migrationIntervalTotal = lastMigrationInterval = 0;
           RWScoresPerInterval = 0;
           predictRowHit = predictRowMiss = lastAccessTick = 0;
           readreqPerInterval = writereqPerInterval = 0;
-          lastAccessInterval = 0;
+          lastAccessInterval = wirdIntervalNum = expireTime = 0;
         }
 
         int readcount;
         int writecount;
         int RowBufMissRd;
         int RowBufMissWr;
-        bool clockDirtyBit;
+        uint64_t wirdIntervalNum;
+        uint64_t expireTime;
+        bool wirdDirtyBit;
         bool justMigrate;
         bool isDirty;
         bool isInDram;
@@ -1057,34 +1059,35 @@ class HybridMem : public ClockedObject
 
     };
 
-    class Clock
+    class WIRD
 		{
 			private:
 				int rollingIdx;
 				int threshold;
-				int expired;
-				// Pagetable *pt;
+        uint64_t reqsCounter;
+        uint64_t intervalNum;
 
 				class storage
 				{
 					public:
-						bool dirtyBit;
-						int freqCount;
-						int overlook;
-
+						uint64_t expireTime;
 						class Page *page;
 
 				};
 				std::vector<storage> list;
 
 			public:
-				Clock();
+				WIRD();
 				class Page *getEvicPage();
 				void putPage(class Page *);
         void popPage(class Page *);
-				void setDirty(class Page *);
+        void setExpitreTime(class Page *);
+        void intervalUpdatePCM();
+        uint64_t getIntervalNum();
+        int getThreshold();
+        void reqsCounterUpdate();
 		};
-		Clock* dwf;
+		WIRD* wird;
 
     class HybridMemSenderState : public Packet::SenderState
     {

@@ -2426,12 +2426,13 @@ void
 DRAMCtrl::Rank::processRefreshEvent()
 {
     //skip refresh if count of bin refreshed this time is 0
-    if(memory.enableBinAware && !memory.binsNeedREF->at(rank)->at(nextREFBin)) {
+    if (memory.enableBinAware && refreshState == REF_IDLE
+            && !memory.binsNeedREF->at(rank)->at(nextREFBin)) {
         tmpREFState = refreshState;
         refreshState = REF_PASS;
     }
 
-    if(refreshState == REF_PASS) {
+    if (refreshState == REF_PASS) {
         refreshState = tmpREFState;
         tmpREFState = REF_IDLE;
         // std::cout<<"Skip Ref at Bin: "<<nextREFBin<<"\n";
@@ -2446,7 +2447,7 @@ DRAMCtrl::Rank::processRefreshEvent()
             reschedule(refreshEvent, refreshDueAt);
 
         return;
-    }else {
+    } else {
         //nothing
     }
 
