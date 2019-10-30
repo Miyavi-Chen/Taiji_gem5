@@ -245,7 +245,11 @@ ZeroXBar::Layer<SrcType,DstType>::recvRetry()
 {
     // we should never get a retry without having failed to forward
     // something to this port
-    assert(waitingForPeer != NULL);
+        // assert(waitingForPeer != NULL);
+    if (waitingForPeer == NULL) {
+        std::cout<< "waitingForPeer == NULL\n";
+        return;
+    }
 
     // add the port where the failed packet originated to the front of
     // the waiting ports for the layer, this allows us to call retry

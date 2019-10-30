@@ -1194,7 +1194,7 @@ HybridMem::trySendRetry()
                 // wait = WaitState::trySELF_wMASTER;
                 // issueTimingMigrationPkt();
                 if (wait == WaitState::tryMASTER_wSELF) {
-                    wait = WaitState::wMASTER;
+                    wait = WaitState::wSELF;
                 }
             } else if (wait == WaitState::wSELF) {
                 wait = WaitState::trySELF;
