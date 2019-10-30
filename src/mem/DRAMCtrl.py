@@ -1411,10 +1411,12 @@ class PCM_LPDDR2_8G_400_16x4(PCM_LPDDR2_400_8x8):
     # qos_policy = QoSFixedPriorityPolicy()
     # # qos_policy.setMasterPriority("hybrid_mem", 1)
 
+    enable_dram_powerdown = True
     # size of device
     device_size = '512MB'
 
     tRCD = '28ns'
+    tRP = '150ns'
     tWP = '150ns'
     tCL = '15ns'
     tRAS = '43ns'

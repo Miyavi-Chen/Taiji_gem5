@@ -92,7 +92,7 @@ HybridMem::HybridMem(const HybridMemParams* p)
       refPagePerIntervalnum(0), refPageinDramPerIntervalnum(0),
       refPageinPcmPerIntervalnum(0), reqInDramCount(0), reqInPcmCount(0),
       reqInDramCountPI(0),
-      statsStore(128), MissThreshold(2), numMigrate(0),
+      statsStore(128), MissThreshold(32), numMigrate(0),
       numReadDram(0), numWriteDram(0), preBenefit(0), dirMissThreshold(false),
       MigrationTimeStartAt(0), bootUpTick(0),
       prevArrival(0), reqsPI(0), totGapPI(0),
@@ -1105,7 +1105,7 @@ HybridMem::recvFunctionalMigrationResp(PacketPtr pkt)
         migrationTasks.erase(it);
         delete task;
 
-        // trySendRetry();
+        trySendRetry();
     }
 }
 
@@ -1194,7 +1194,7 @@ HybridMem::trySendRetry()
                 wait = WaitState::trySELF_wMASTER;
                 issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
-                    wait = WaitState::wMASTER;
+                    wait = WaitState::wMASTER_wSELF;
                 }
             } else if (wait == WaitState::wMASTER) {
                 wait = WaitState::tryMASTER;
@@ -1208,7 +1208,7 @@ HybridMem::trySendRetry()
                 // wait = WaitState::trySELF_wMASTER;
                 // issueTimingMigrationPkt();
                 if (wait == WaitState::tryMASTER_wSELF) {
-                    wait = WaitState::wMASTER;
+                    wait = WaitState::wSELF_wMASTER;
                 }
             } else if (wait == WaitState::wSELF) {
                 wait = WaitState::trySELF;
@@ -1236,11 +1236,21 @@ HybridMem::trySendRetry()
                 // wait = WaitState::trySELF_wMASTER;
                 // issueTimingMigrationPkt();
                 if (wait == WaitState::tryMASTER_wSELF) {
-                    wait = WaitState::wMASTER;
+                    wait = WaitState::wSELF_wMASTER;
                 }
             } else if (wait == WaitState::wSELF) {
+                // wait = WaitState::trySELF;
+                // issueTimingMigrationPkt();
+                // if (wait == WaitState::trySELF) {
+                //     wait = WaitState::wNONE;
+                // }
                 break;
             } else if (wait == WaitState::wSELF_wMASTER) {
+                // wait = WaitState::trySELF_wMASTER;
+                // issueTimingMigrationPkt();
+                // if (wait == WaitState::trySELF_wMASTER) {
+                //     wait = WaitState::wMASTER_wSELF;
+                // }
                 break;
             } else if (wait == WaitState::wNONE) {
                 break;
@@ -1254,7 +1264,7 @@ HybridMem::trySendRetry()
                 wait = WaitState::trySELF_wMASTER;
                 issueTimingMigrationPkt();
                 if (wait == WaitState::trySELF_wMASTER) {
-                    wait = WaitState::wMASTER;
+                    wait = WaitState::wMASTER_wSELF;
                 }
             } else if (wait == WaitState::wSELF) {
                 wait = WaitState::trySELF;
@@ -1263,8 +1273,20 @@ HybridMem::trySendRetry()
                     wait = WaitState::wNONE;
                 }
             } else if (wait == WaitState::wMASTER) {
+                // wait = WaitState::tryMASTER;
+                // slavePort.sendRetryReq();
+                // if (wait == WaitState::tryMASTER) {
+                //     wait = WaitState::wNONE;
+                // }
                 break;
             } else if (wait == WaitState::wMASTER_wSELF) {
+                // wait = WaitState::tryMASTER_wSELF;
+                // slavePort.sendRetryReq();
+                // // wait = WaitState::trySELF_wMASTER;
+                // // issueTimingMigrationPkt();
+                // if (wait == WaitState::tryMASTER_wSELF) {
+                //     wait = WaitState::wSELF_wMASTER;
+                // }
                 break;
             } else if (wait == WaitState::wNONE) {
                 break;
