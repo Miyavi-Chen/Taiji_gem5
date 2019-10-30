@@ -38,34 +38,34 @@ class LFU
 		int cur = tail;
 
 		if (head == -1 && tail == -1) {
-		head = tail = idx;
-		checkLFUErr();
-		return;
+			head = tail = idx;
+			checkLFUErr();
+			return;
 		}
 
 		while (cur != -1) {
-		if (lfuNodes[cur].DValue > lfuNodes[idx].DValue) {
-			lfuNodes[idx].pre = cur;
-			lfuNodes[idx].next = lfuNodes[cur].next;
-			if (cur == tail) {
-			tail = idx;
-			} else {
-			lfuNodes[lfuNodes[cur].next].pre = idx;
-			}
-			lfuNodes[cur].next = idx;
-			checkLFUErr();
-			return;
+			if (lfuNodes[cur].DValue > lfuNodes[idx].DValue) {
+				lfuNodes[idx].pre = cur;
+				lfuNodes[idx].next = lfuNodes[cur].next;
+				if (cur == tail) {
+					tail = idx;
+				} else {
+					lfuNodes[lfuNodes[cur].next].pre = idx;
+				}
+				lfuNodes[cur].next = idx;
+				checkLFUErr();
+				return;
 
-		} else {
-			cur = lfuNodes[cur].pre;
-		}
+			} else {
+				cur = lfuNodes[cur].pre;
+			}
 		}
 
 		if (cur == -1) {
-		lfuNodes[head].pre = idx;
-		lfuNodes[idx].next = head;
-		lfuNodes[idx].pre = -1;
-		head = idx;
+			lfuNodes[head].pre = idx;
+			lfuNodes[idx].next = head;
+			lfuNodes[idx].pre = -1;
+			head = idx;
 		}
 		checkLFUErr();
 	}
@@ -75,21 +75,21 @@ class LFU
 		lfuNodes[i].DValue += Dvalue;
 		assert(Dvalue > 0);
 		if (size == 1 || i == head) {
-		checkLFUErr();
-		return;
+			checkLFUErr();
+			return;
 		} else if (i == tail) {
-		int pre = lfuNodes[i].pre;
-		lfuNodes[pre].next = -1;
-		tail = pre;
-		lfuNodes[i].pre = lfuNodes[i].next = -1;
-		order(i);
+			int pre = lfuNodes[i].pre;
+			lfuNodes[pre].next = -1;
+			tail = pre;
+			lfuNodes[i].pre = lfuNodes[i].next = -1;
+			order(i);
 		} else {
-		int pre = lfuNodes[i].pre;
-		int next = lfuNodes[i].next;
-		lfuNodes[pre].next = next;
-		lfuNodes[next].pre = pre;
-		lfuNodes[i].pre = lfuNodes[i].next = -1;
-		order(i);
+			int pre = lfuNodes[i].pre;
+			int next = lfuNodes[i].next;
+			lfuNodes[pre].next = next;
+			lfuNodes[next].pre = pre;
+			lfuNodes[i].pre = lfuNodes[i].next = -1;
+			order(i);
 		}
 
 	}
@@ -98,26 +98,26 @@ class LFU
 	{
 		struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
 		if (size == maxSize) {
-		evictPage.val = lfuNodes[tail].hostAddr;
-		// std::cout << lfuNodes[tail].hostAddr <<"/"<< lfuNodes[tail].DValue << " removed.\n";
+			evictPage.val = lfuNodes[tail].hostAddr;
+			// std::cout << lfuNodes[tail].hostAddr <<"/"<< lfuNodes[tail].DValue << " removed.\n";
 
-		int tmpIdx = tail;
-		int pre = lfuNodes[tmpIdx].pre;
-		lfuNodes[pre].next = -1;
-		lfuNodes[tmpIdx].pre = -1;
-		lfuNodes[tmpIdx].next = -1;
-		tail = pre;
+			int tmpIdx = tail;
+			int pre = lfuNodes[tmpIdx].pre;
+			lfuNodes[pre].next = -1;
+			lfuNodes[tmpIdx].pre = -1;
+			lfuNodes[tmpIdx].next = -1;
+			tail = pre;
 
-		int n = mapIndex.erase(lfuNodes[tmpIdx].hostAddr);
-		if (n != 1) {
-			printf("LFU error!1\n");
-			exit(-1);
-		}
-		lfuNodes[tmpIdx].hostAddr = addr;
-		lfuNodes[tmpIdx].DValue = Dvalue;
-		mapIndex.insert(std::make_pair(addr, tmpIdx));
-		order(tmpIdx);
-		return evictPage;
+			int n = mapIndex.erase(lfuNodes[tmpIdx].hostAddr);
+			if (n != 1) {
+				printf("LFU error!1\n");
+				exit(-1);
+			}
+			lfuNodes[tmpIdx].hostAddr = addr;
+			lfuNodes[tmpIdx].DValue = Dvalue;
+			mapIndex.insert(std::make_pair(addr, tmpIdx));
+			order(tmpIdx);
+			return evictPage;
 
 		}
 		++size;
@@ -140,9 +140,9 @@ class LFU
 	{
 		struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
 		if (mapIndex.find(addr) == mapIndex.end())
-		evictPage = insert(addr, Dvalue);
+			evictPage = insert(addr, Dvalue);
 		else
-		increment(mapIndex[addr], Dvalue);
+			increment(mapIndex[addr], Dvalue);
 
 		return evictPage;
 	}
@@ -154,17 +154,17 @@ class LFU
 		size = 0;
 		mapIndex.clear();
 		for (int i = 0; i < maxSize; ++i) {
-		lfuNodes[i].hostAddr = std::numeric_limits<Addr>::max();
-		lfuNodes[i].DValue = 0;
-		lfuNodes[i].next = -1;
-		lfuNodes[i].pre = -1;
+			lfuNodes[i].hostAddr = std::numeric_limits<Addr>::max();
+			lfuNodes[i].DValue = 0;
+			lfuNodes[i].next = -1;
+			lfuNodes[i].pre = -1;
 		}
 	}
 	void checkLFUErr()
 	{
 		std::unordered_set<Addr> lfuList;
 		for (int i = 0, cur = head; i < size; ++i, cur = lfuNodes[cur].next) {
-		lfuList.insert(lfuNodes[cur].hostAddr);
+			lfuList.insert(lfuNodes[cur].hostAddr);
 		}
 		assert(lfuList.size() == capacity());
 	}
@@ -174,10 +174,10 @@ class LFU
 	{
 		bool ret = false;
 		for (int i = 0, cur = head; i < size; ++i, cur = lfuNodes[cur].next) {
-		if (lfuNodes[cur].hostAddr == addr) {
-			ret = true;
-			break;
-		}
+			if (lfuNodes[cur].hostAddr == addr) {
+				ret = true;
+				break;
+			}
 		}
 		return ret;
 	}
@@ -185,7 +185,7 @@ class LFU
 	void printLFU()
 	{
 		for (int i = 0, cur = head; i < size; ++i, cur = lfuNodes[cur].next) {
-		std::cout<<lfuNodes[cur].DValue<<", ";
+			std::cout<<lfuNodes[cur].DValue<<", ";
 		}
 		std::cout<<"\n";
 	}
@@ -213,29 +213,29 @@ class LFUDA : public LFU
 	{
 		struct PageAddr evictPage = {std::numeric_limits<Addr>::max()};
 		if (mapIndex.find(addr) == mapIndex.end()) {
-		++threshold;
-		if (size == maxSize) {
-			if (lfuNodes[tail].DValue > threshold) {
-			return evictPage;
+			++threshold;
+			if (size == maxSize) {
+				if (lfuNodes[tail].DValue > threshold) {
+					return evictPage;
+				} else {
+					evictPage = insert(addr, threshold);
+				}
 			} else {
-			evictPage = insert(addr, threshold);
+				evictPage = insert(addr, threshold);
 			}
 		} else {
-			evictPage = insert(addr, threshold);
-		}
-		} else {
-		increment(mapIndex[addr], Dvalue);
-		if (lfuNodes[mapIndex[addr]].DValue >= maxHits) {
-			// std::cout<<"Reach Max Hits\n";
-			for (auto & iter : mapIndex) {
-			lfuNodes[iter.second].DValue =
-				lfuNodes[iter.second].DValue - maxHits < 0 ?
-				0 : lfuNodes[iter.second].DValue - maxHits;
+			increment(mapIndex[addr], Dvalue);
+			if (lfuNodes[mapIndex[addr]].DValue >= maxHits) {
+				// std::cout<<"Reach Max Hits\n";
+				for (auto & iter : mapIndex) {
+					lfuNodes[iter.second].DValue =
+						lfuNodes[iter.second].DValue - maxHits < 0 ?
+						0 : lfuNodes[iter.second].DValue - maxHits;
 
+				}
+
+				threshold = 0;
 			}
-
-			threshold = 0;
-		}
 		}
 
 		return evictPage;

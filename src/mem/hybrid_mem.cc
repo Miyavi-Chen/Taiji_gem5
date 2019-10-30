@@ -375,6 +375,7 @@ HybridMem::getMigrationPageNum(size_t& migrationPageNum,
 {
     pcmScore = std::max(pcmScore, uint64_t(1));
     dramScore = std::max(dramScore, uint64_t(1));
+    dramScore = dramScore < (pcmScore>>3) ? pcmScore>>3 : dramScore;
     std::cout<<"pcmScore: "<<pcmScore<<" dramScore: "<<dramScore<<"\n";
 
     double pcmLatXQlenPerScore = PCMLatXQlen / double(pcmScore);
@@ -422,12 +423,12 @@ HybridMem::getMigrationPageNum(size_t& migrationPageNum,
                 double infPcm =
                     (double)(page->RScoresPerInterval+page->WScoresPerInterval);
 
-                assert(infPcm <= infPcmMax);
-                if (infDram > infDramMax) {
-                    infDram = infDramMax;
-                }
-                std::cout<<"rowHit "<<rowHit<<", rowMiss "<<rowMiss<<" ";
-                std::cout<<"infDram "<<infDram<<", infPcm "<<infPcm<<"\n";
+                // assert(infPcm <= infPcmMax);
+                if (infDram > infDramMax) { infDram = infDramMax;}
+                if (infPcm > infPcmMax) { infPcm = infPcmMax;}
+
+                // std::cout<<"rowMiss "<<rowMiss<<" ";
+                // std::cout<<"infDram "<<infDram<<", infPcm "<<infPcm<<"\n";
 
                 DRAMLatXQlen += infDram * dramLatXQlenPerScore * alpha;
                 PCMLatXQlen -= infPcm * pcmLatXQlenPerScore * alpha;
@@ -465,12 +466,12 @@ HybridMem::getMigrationPageNum(size_t& migrationPageNum,
                 double infPcm = (avgRdQLenPCM + 1) *
                         (double)(rowHit + rowMiss * MISSHITRATIOPCM);
 
-                assert(infDram <= infDramMax);
-                if (infPcm > infPcmMax) {
-                    infPcm = infPcmMax;
-                }
-                std::cout<<"rowHit "<<rowHit<<", rowMiss "<<rowMiss<<" ";
-                std::cout<<"infDram "<<infDram<<", infPcm "<<infPcm<<"\n";
+                // assert(infDram <= infDramMax);
+                if (infDram > infDramMax) { infDram = infDramMax;}
+                if (infPcm > infPcmMax) { infPcm = infPcmMax;}
+
+                // std::cout<<"rowMiss "<<rowMiss<<" ";
+                // std::cout<<"infDram "<<infDram<<", infPcm "<<infPcm<<"\n";
 
                 DRAMLatXQlen -= infDram * dramLatXQlenPerScore * alpha;
                 PCMLatXQlen += infPcm * pcmLatXQlenPerScore * alpha;
@@ -670,10 +671,12 @@ HybridMem::genDramMigrationTasks(size_t &migrationPageNum)
         struct PageAddr pageAddr = {host_PN};
         class Page *page = pages.pageOf(pageAddr);
         assert(page->isValid(cacheMem_id));
-        assert(migrationPages.find(host_PN)!=migrationPages.end());
-        migrationPages.erase(host_PN);
+        // assert(migrationPages.find(host_PN)!=migrationPages.end());
+        // migrationPages.erase(host_PN);
         if (page->isPageCache) {++pageCacheCount;}
 
+        if (migrationPages.find(host_PN)!=migrationPages.end())
+            migrationPages.erase(host_PN);
         if (migrationPagesPI.find(host_PN)!=migrationPagesPI.end())
             migrationPagesPI.erase(host_PN);
 
@@ -716,7 +719,8 @@ HybridMem::handlePFDMA(class Page * page, PacketPtr pkt)
             }
 
         }
-        page->writecount = page->readcount = -64;
+        page->writecount = -64;
+        page->readcount = -64;
 
         // if (!warmUpEvent.scheduled()) {
         //     schedule(warmUpEvent, curTick() + timeWarmup);

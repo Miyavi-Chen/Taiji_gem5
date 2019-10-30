@@ -790,8 +790,9 @@ class HybridMem : public ClockedObject
 
         void resetPageCounters()
         {
-          if (isPageCache) {readcount = -64; writecount = -64;}
-          else {readcount = 0; writecount = 0;}
+          // if (isPageCache) {readcount = -64; writecount = -64;}
+          // else {writecount = 0;}
+          readcount = writecount = 0;
           totRdQLen = 0;
           //observation
           // migrationCount = 0;
