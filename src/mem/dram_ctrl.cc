@@ -229,7 +229,7 @@ DRAMCtrl::DRAMCtrl(const DRAMCtrlParams* p) :
         assert(tWR == 0);
         assert(tWP > 0);
         // assert(tRAS == 0);
-        assert(tRP == 0);
+        // assert(tRP == 0);
         if (memCellScheme == Enums::NvmWriteBack) {
             *(const_cast<Tick*>(&tRP)) = tWP;
             *(const_cast<Tick*>(&tWP)) = 0;
